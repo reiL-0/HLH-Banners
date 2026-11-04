@@ -1,6 +1,11 @@
-# HLH Banners - PROBE. Answers: which stdlib modules the game's Python has, whether a local server runs,
-# and whether the 'book' opening can be drawn. Results go to probe_result.txt next to this file.
-# Python 3.3 compatible (no f-strings).
+# HLH Banners - DRAFT / PROBE. Nothing in this file has run inside Assetto Corsa yet: the AC calls below (ac.gl*, ac.newTexture, labels) are written from the API as remembered.
+# It draws the capsule banners, takes the hub's lines on 127.0.0.1 and reports what works to probe_result.txt, so the first session in the game answers the open questions:
+#   - which stdlib modules the game's Python has (socket, http.server, hashlib, json, winsound...)
+#   - does the local server run, and does the CSP script reach it (POST /tick)
+#   - GL: the rounded capsule, an alpha PNG icon (glQuadTextured)
+#   - TEXT: AC apps have no clip rectangle and no text measure; "Mascara" tells if a quad drawn in the render callback hides a label (look at the screen)
+#   - AUDIO: "Audio" tries winsound with a generated wav (the radio beep)
+# The pure parts (capsule.py, ipc.py, guard.py) are tested on a desktop: tests/. Python 3.3 compatible (no f-strings).
 import os
 import sys
 import time
@@ -16,18 +21,25 @@ import ac
 import acsys
 
 PORT = 28761
+RESULT = os.path.join(HERE, "probe_result.txt")
+INI = os.path.join(HERE, "hlh_banners.ini")
+LOCK = threading.Lock()
 app = None
 server = None
-last_render = 0.0
-t0 = time.time()
-lines = []
+notes = []
+state = {"lines": [], "lines_at": 0.0, "last_render": 0.0, "lang": "auto", "demo": False, "demo_t": 0.0, "mask": False, "test_window": True}
+stack = None
+labels, textures = [], {}
+buttons = {}
+POOL = 4   # capsules drawn at once (labels are widgets: a fixed set of them is made once)
+STEP = 64  # px between capsules
 
 
 def note(key, val):
-    lines.append("%s: %s" % (key, val))
+    notes.append("%s: %s" % (key, val))
     try:
-        with open(os.path.join(HERE, "probe_result.txt"), "w") as f:
-            f.write("\n".join(lines) + "\n")
+        with open(RESULT, "w") as f:
+            f.write("\n".join(notes) + "\n")
     except Exception:
         pass
 
@@ -42,14 +54,77 @@ def try_import(name):
         return False
 
 
+# ---- the language the driver picks here (the hub asks the app before it asks the website) -------------------------------------------------------------------------------------
+def load_lang():
+    try:
+        import configparser
+        c = configparser.ConfigParser()
+        c.read(INI)
+        v = c.get("app", "lang")
+        if v in ("auto", "es", "en"):
+            state["lang"] = v
+    except Exception:
+        pass
+
+
+def save_lang():
+    try:
+        import configparser
+        c = configparser.ConfigParser()
+        c["app"] = {"lang": state["lang"]}
+        with open(INI, "w") as f:
+            c.write(f)
+    except Exception as e:
+        note("save lang", "FAIL " + repr(e))
+
+
+# ---- the local server -----------------------------------------------------------------------------------------------------------------------------------------------------------
 def serve():
     global server
     import base64, hashlib, json
+    import socket
     from http.server import HTTPServer, BaseHTTPRequestHandler
+    from socketserver import ThreadingMixIn
     import guard
+    import ipc
+
+    slots = threading.BoundedSemaphore(8)   # at most 8 connections at once (it is loopback: the hub needs one)
+
+    class S(ThreadingMixIn, HTTPServer):
+        """One thread per connection, so a slow client cannot hold up the hub's heartbeat or the game's shutdown (daemon threads are not waited for)."""
+        daemon_threads = True
+
+        def handle_error(self, request, client_address):   # (a connection cut by its deadline or by the shutdown is not worth a traceback in the game's log)
+            pass
+
+        def process_request(self, request, client_address):
+            if not slots.acquire(False):
+                return self.shutdown_request(request)
+            ThreadingMixIn.process_request(self, request, client_address)
+
+        def process_request_thread(self, request, client_address):
+            try:
+                ThreadingMixIn.process_request_thread(self, request, client_address)
+            finally:
+                slots.release()
 
     class H(BaseHTTPRequestHandler):
-        timeout = 5
+        timeout = 5   # (between reads; the whole request also has a deadline: see setup)
+
+        def setup(self):
+            BaseHTTPRequestHandler.setup(self)
+            def kill():   # a request that drips in slowly is cut after 10 s, whatever it sends
+                try:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                except Exception:
+                    pass
+            self._deadline = threading.Timer(10.0, kill)
+            self._deadline.daemon = True
+            self._deadline.start()
+
+        def finish(self):
+            self._deadline.cancel()
+            BaseHTTPRequestHandler.finish(self)
 
         def log_message(self, *a):
             pass
@@ -68,17 +143,27 @@ def serve():
                 return self.reply(bad[0], {"error": bad[1]})
             n = int(self.headers.get("Content-Length"))
             data = self.rfile.read(n) if n else b""
-            if self.path == "/tick":
-                age = int((time.time() - last_render) * 1000) if last_render else -1
-                return self.reply(200, {"render_age_ms": age})
-            if self.path == "/echo":   # base64 round trip: what the pack download will use
+            if self.path == "/tick":   # the heartbeat AND the data: the hub sends the lines it composed (an empty body = only a heartbeat)
+                if data:
+                    try:
+                        obj = json.loads(data.decode("utf-8"))
+                        if isinstance(obj, dict) and obj.get("v", 1) != 1:   # a script that speaks another version of the contract: it draws by itself
+                            return self.reply(409, {"error": "version"})
+                        lines = ipc.validate_lines(obj)
+                    except ValueError as e:   # (a ValueError is also what a bad JSON raises: the answer never echoes the body)
+                        return self.reply(400, {"error": "lines"})
+                    with LOCK:
+                        state["lines"], state["lines_at"] = lines, time.time()
+                age = int((time.time() - state["last_render"]) * 1000) if state["last_render"] else -1
+                return self.reply(200, {"render_age_ms": age, "lang": state["lang"], "v": 1})
+            if self.path == "/echo":   # the base64 round trip the pack download will use
                 raw = base64.b64decode(data)
                 return self.reply(200, {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()})
             self.reply(404, {"error": "path"})
 
         do_POST = do_GET = do_OPTIONS = do_PUT = do_DELETE = handle_any
 
-    server = HTTPServer(("127.0.0.1", PORT), H)
+    server = S(("127.0.0.1", PORT), H)
     note("server", "listening on 127.0.0.1:%d" % PORT)
     server.serve_forever()
 
@@ -90,41 +175,192 @@ def thread_main():
         note("server", "FAIL " + repr(e))
 
 
+# ---- drawing: GL only (no clip, no text measure in AC apps) -----------------------------------------------------------------------------------------------------------------
+def quad(x, y, w, h):
+    ac.glBegin(acsys.GL.Quads)
+    ac.glVertex2f(x, y)
+    ac.glVertex2f(x + w, y)
+    ac.glVertex2f(x + w, y + h)
+    ac.glVertex2f(x, y + h)
+    ac.glEnd()
+
+
+def rrect(x, y, w, h, r, rgba):
+    """A filled rounded rectangle: a cross of two quads and four corner fans."""
+    import math
+    r = max(0.0, min(r, w / 2.0, h / 2.0))
+    ac.glColor4f(*rgba)
+    quad(x + r, y, w - 2 * r, h)
+    quad(x, y + r, r, h - 2 * r)
+    quad(x + w - r, y + r, r, h - 2 * r)
+    for cx, cy, a0 in ((x + r, y + r, math.pi), (x + w - r, y + r, 1.5 * math.pi), (x + w - r, y + h - r, 0.0), (x + r, y + h - r, 0.5 * math.pi)):
+        ac.glBegin(acsys.GL.Triangles)
+        for i in range(6):
+            a, b = a0 + i * math.pi / 12, a0 + (i + 1) * math.pi / 12
+            ac.glVertex2f(cx, cy)
+            ac.glVertex2f(cx + r * math.cos(a), cy + r * math.sin(a))
+            ac.glVertex2f(cx + r * math.cos(b), cy + r * math.sin(b))
+        ac.glEnd()
+
+
+def icon(img):
+    if img not in textures:
+        path = os.path.join(HERE, "icons", "ico-" + img + ".png")   # img passed ipc.KEY: no path separators; only a file that exists
+        try:
+            textures[img] = ac.newTexture(path) if os.path.isfile(path) else None
+        except Exception as e:
+            textures[img] = None
+            note("texture " + img, "FAIL " + repr(e))
+    return textures[img]
+
+
+def text_width(s, size):   # AC apps cannot measure text: an estimate (the real width is found in the first session)
+    return len(s) * size * 0.62
+
+
+def draw_capsule(wx, wy, slot, e):
+    c, l = e["cap"], e["line"]
+    col = l["c"]
+    title, sub = l["title"], l["sub"]
+    max_w = max(text_width(title, 18), text_width(sub, 11)) + 10
+    tw = max_w * c.w
+    sc, fade = c.scale, c.fade
+    W = 12 + 44 + (10 + tw if tw > 1 else 0)
+    w, h = W * sc, 56 * sc
+    x, y = wx + 8, wy + 8 + slot * STEP + (56 - h) / 2.0
+    rrect(x - 2 * sc, y - 2 * sc, w + 4 * sc, h + 4 * sc, 16 * sc, (col[0], col[1], col[2], fade))   # the 2 px border
+    rrect(x, y, w, h, 14 * sc, (0.047, 0.047, 0.055, 0.94 * fade))
+    bs = 44 * c.pop * sc
+    bx, by = x + 6 * sc + (44 * sc - bs) / 2.0, y + (h - bs) / 2.0
+    rrect(bx, by, bs, bs, 11 * sc, (col[0], col[1], col[2], fade))
+    tex = icon(l["img"])
+    if tex:
+        ac.glColor4f(1, 1, 1, fade)
+        ac.glQuadTextured(bx + bs * 0.14, by + bs * 0.14, bs * 0.72, bs * 0.72, tex)
+    # the text: labels are widgets, drawn by the game, not clipped by us. alpha follows the unfolding; a mask experiment is below.
+    t_lab, s_lab = labels[slot]
+    a = c.w ** 3
+    tx = x + 6 + 44 + 10
+    ac.setPosition(t_lab, tx - wx, y + 8 - wy)
+    ac.setPosition(s_lab, tx - wx, y + 31 - wy)
+    ac.setText(t_lab, title if tw > 1 else "")
+    ac.setText(s_lab, sub if tw > 1 else "")
+    ac.setFontColor(t_lab, 1, 1, 1, a)
+    ac.setFontColor(s_lab, 0.68, 0.71, 0.76, a)
+    if state["mask"] and tw > 1:   # does a quad drawn here hide the label's right part? (then the text can be clipped to the panel)
+        ac.glColor4f(0.047, 0.047, 0.055, 1)
+        quad(x + 6 + 44 + 10 + tw, y, max_w - tw + 40, h)
+
+
+def on_render(delta):
+    global stack
+    now = time.time()
+    state["last_render"] = now
+    wx, wy = ac.getPosition(app)
+    if state["demo"]:
+        state["demo_t"] = (state["demo_t"] + delta) % 26.0
+    with LOCK:
+        live = state["lines"] if now - state["lines_at"] < 1.0 else None
+    lines = live if live is not None else (demo_lines(state["demo_t"]) if state["demo"] else [])
+    drawn = stack.update(lines, max(0.0, min(delta, 0.1)))
+    for slot in range(POOL):
+        if slot >= len(drawn):
+            ac.setText(labels[slot][0], "")
+            ac.setText(labels[slot][1], "")
+    for slot, e in enumerate(drawn[:POOL]):
+        draw_capsule(wx, wy, slot, e)
+
+
+# ---- the demo: every kind of banner in one timeline ----------------------------------------------------------------------------------------------------------------------------
+def demo_lines(t):
+    def ln(i, img, kind, c, title, sub, ev):
+        return {"id": i, "img": img, "kind": kind, "c": c, "title": title, "sub": sub, "ev": ev}
+    out = []
+    if 0 <= t < 14:
+        out.append(ln("flag", "flag-yellow", "info", [1.0, 0.757, 0.027], "AMARILLA", "PRECAUCION EN PISTA", "a"))   # an information banner: folds to the icon after 5 s
+    if 2 <= t < 18:
+        out.append(ln("n-blue", "flag-blue", "action", [0.161, 0.475, 1.0], "BANDERA AZUL", "DEJA PASAR AL MAS RAPIDO", "b"))   # an instruction: keeps its text while it applies
+    if 4 <= t < 10:
+        out.append(ln("track-limits", "track-limits", "info", [0.361, 0.42, 0.753], "LIMITES DE PISTA", "LLEVAS 2/5 - TE QUEDAN 3", "cut2"))
+    if 6 <= t < 25:
+        out.append(ln("winner", "winner", "sticky", [1.0, 0.835, 0.31], "GANADOR", "SOFIA RIOS", "w"))   # fixed until the session restarts
+    return out
+
+
+# ---- the buttons (probe window) -------------------------------------------------------------------------------------------------------------------------------------------------
+def beep_wav():
+    import math, struct, wave
+    path = os.path.join(HERE, "hlh_beep.wav")
+    rate = 22050
+    frames = []
+    for i in range(int(rate * 0.14)):   # a short burst of noise...
+        frames.append(int(((i * 7919) % 2000 - 1000) * 24 * (1 - i / (rate * 0.14))))
+    for i in range(int(rate * 0.10)):   # ...and one beep
+        frames.append(int(11000 * math.sin(2 * math.pi * 1250 * i / rate)))
+    w = wave.open(path, "wb")
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(rate)
+    w.writeframes(b"".join(struct.pack("<h", max(-32767, min(32767, v))) for v in frames))
+    w.close()
+    return path
+
+
+def on_audio(*args):
+    try:
+        import winsound
+        winsound.PlaySound(beep_wav(), winsound.SND_FILENAME | winsound.SND_ASYNC)
+        note("audio", "winsound.PlaySound called: did you hear a short burst and a beep?")
+    except Exception as e:
+        note("audio", "FAIL " + repr(e))
+
+
+def on_demo(*args):
+    state["demo"] = not state["demo"]
+    state["demo_t"] = 0.0
+    ac.setText(buttons["demo"], "Demo: " + ("on" if state["demo"] else "off"))
+
+
+def on_mask(*args):
+    state["mask"] = not state["mask"]
+    ac.setText(buttons["mask"], "Mascara: " + ("on" if state["mask"] else "off"))
+    note("mask", "now %s: with it on, is the text cut at the panel's edge? (look at the screen)" % state["mask"])
+
+
+def on_lang(*args):
+    state["lang"] = {"auto": "es", "es": "en", "en": "auto"}[state["lang"]]
+    ac.setText(buttons["lang"], "Idioma: " + state["lang"])
+    save_lang()
+
+
 def acMain(ac_version):
-    global app
+    global app, stack
+    import capsule
     note("python", sys.version.replace("\n", " "))
-    for m in ("socket", "ssl", "http.server", "hashlib", "binascii", "base64", "json", "threading"):
+    for m in ("socket", "ssl", "http.server", "hashlib", "binascii", "base64", "json", "threading", "configparser", "winsound", "wave"):
         try_import(m)
+    load_lang()
+    stack = capsule.Stack()
     app = ac.newApp("HLH Banners probe")
-    ac.setSize(app, 360, 80)
-    ac.setBackgroundOpacity(app, 0)
-    ac.drawBorder(app, 0)
+    ac.setSize(app, 520, 330)
+    ac.setBackgroundOpacity(app, 0.35)
+    for i in range(POOL):
+        t = ac.addLabel(app, "")
+        s = ac.addLabel(app, "")
+        ac.setFontSize(t, 18)
+        ac.setFontSize(s, 11)
+        labels.append((t, s))
+    for n, (key, text, fn, x) in enumerate((("demo", "Demo: off", on_demo, 8), ("audio", "Audio", on_audio, 138), ("mask", "Mascara: off", on_mask, 238), ("lang", "Idioma: " + state["lang"], on_lang, 378))):
+        b = ac.addButton(app, text)
+        ac.setPosition(b, x, 290)
+        ac.setSize(b, 120 if key != "audio" else 90, 28)
+        ac.addOnClickedListener(b, fn)
+        buttons[key] = b
     ac.addRenderCallback(app, on_render)
     t = threading.Thread(target=thread_main)
     t.daemon = True
     t.start()
     return "HLH Banners probe"
-
-
-def ease(x):   # smoothstep
-    return x * x * (3 - 2 * x)
-
-
-def on_render(delta):
-    # the book: two halves open from the middle, hold, close again (4 s loop)
-    global last_render
-    last_render = time.time()
-    ph = ((last_render - t0) % 4.0) / 4.0
-    o = ease(ph * 4) if ph < 0.25 else (1.0 if ph < 0.75 else ease((1 - ph) * 4))
-    x, y = ac.getPosition(app)
-    half = 168 * o
-    ac.glColor4f(0.95, 0.78, 0.05, 0.95)
-    ac.glBegin(acsys.GL.Quads)
-    ac.glVertex2f(x + 168 - half, y + 10)
-    ac.glVertex2f(x + 168 + half, y + 10)
-    ac.glVertex2f(x + 168 + half, y + 70)
-    ac.glVertex2f(x + 168 - half, y + 70)
-    ac.glEnd()
 
 
 def acShutdown():
