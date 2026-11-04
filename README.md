@@ -1,4 +1,4 @@
-# OPR Banners
+# HLH Banners
 
 Python app for Assetto Corsa that draws the Open Paddock Racing League race-control banners
 (flags, cautions, give-back notices) in a window the driver can move, with opening/closing animations.
