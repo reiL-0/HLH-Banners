@@ -17,7 +17,7 @@ def check(method, headers, port):
             return 403, "browser"
     if "transfer-encoding" in h:
         return 400, "chunked"
-    if h.get("x-opr-init") != "1":
+    if h.get("x-hlh-init") != "1":
         return 403, "header"
     try:
         n = int(h.get("content-length", ""))

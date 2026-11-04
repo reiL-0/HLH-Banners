@@ -1,6 +1,6 @@
 -- PROBE (throwaway): can a CSP script POST to the local app? Run as a script on any AC session (apps/lua or an online script).
 -- Shows, on screen, the answer to /tick every second and a base64 round trip on /echo once.
-local URL, HDR = "http://127.0.0.1:28761", { ["X-OPR-Init"] = "1" }
+local URL, HDR = "http://127.0.0.1:28761", { ["X-HLH-Init"] = "1" }
 local shown, nextAt, echoed = "waiting", 0, false
 
 local function post(path, body, cb)
@@ -24,5 +24,5 @@ function script.update(dt)
 end
 
 function script.drawUI()
-  ui.transparentWindow("opr_banners_probe", vec2(20, 160), vec2(900, 30), function() ui.text(shown) end)
+  ui.transparentWindow("hlh_banners_probe", vec2(20, 160), vec2(900, 30), function() ui.text(shown) end)
 end

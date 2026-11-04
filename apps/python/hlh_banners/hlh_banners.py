@@ -1,4 +1,4 @@
-# OPR Banners - PROBE. Answers: which stdlib modules the game's Python has, whether a local server runs,
+# HLH Banners - PROBE. Answers: which stdlib modules the game's Python has, whether a local server runs,
 # and whether the 'book' opening can be drawn. Results go to probe_result.txt next to this file.
 # Python 3.3 compatible (no f-strings).
 import os
@@ -95,7 +95,7 @@ def acMain(ac_version):
     note("python", sys.version.replace("\n", " "))
     for m in ("socket", "ssl", "http.server", "hashlib", "binascii", "base64", "json", "threading"):
         try_import(m)
-    app = ac.newApp("OPR Banners probe")
+    app = ac.newApp("HLH Banners probe")
     ac.setSize(app, 360, 80)
     ac.setBackgroundOpacity(app, 0)
     ac.drawBorder(app, 0)
@@ -103,7 +103,7 @@ def acMain(ac_version):
     t = threading.Thread(target=thread_main)
     t.daemon = True
     t.start()
-    return "OPR Banners probe"
+    return "HLH Banners probe"
 
 
 def ease(x):   # smoothstep
