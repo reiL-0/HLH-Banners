@@ -248,6 +248,24 @@ local codes = {}
 for _, cp in ipairs(rec.glyphs) do codes[cp] = true end
 assert(codes[0x3F] and codes[0xD1], "an unknown letter becomes '?', an accented one has its picture")
 
+-- the numbers under the banners (to see what the app and the game do), only when asked
+local info = {}
+ui.text = function(t) info[#info + 1] = t end
+H.store.info, H.store.demo = 1, 2
+local maxEntries = 0
+for _ = 1, 800 do
+  frame(0.05)
+  local n = tonumber((info[#info] or ""):match("entradas=(%d+)"))
+  if n then maxEntries = math.max(maxEntries, n) end
+end
+local line = info[#info]
+assert(maxEntries >= 8 and line:find("fps=20", 1, true) and line:find("pido ", 1, true), "the info line says how many entries, the frame rate and the window: " .. maxEntries .. " " .. tostring(line))
+info = {}
+H.store.info = 0
+frame(0.05); assert(#info == 0, "nothing is written when it is off")
+H.store.demo = 1
+ui.text = function() end
+
 -- the settings window runs and lists what is missing
 local listed = {}
 ui.text = function(t) listed[#listed + 1] = t end

@@ -106,7 +106,7 @@ end
 
 -- ---- settings (kept by the game between sessions) ----------------------------------------------------------------------------------------------------------------------------------------
 local SCALES, VOLUMES, LANGS, ROWS = { 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0 }, { 100, 70, 40, 0 }, { "auto", "es", "en" }, { 3, 4, 5, 6, 8, 12 }
-local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 1, rows = 5, reserve = 1 }   -- rows: banners per column before a new column starts; reserve: 1 = the window always has the room of the whole grid (it never has to grow), 0 = it fits what is on screen   -- glyph: 1 = the text as pictures of letters, 0 = DirectWrite (to compare)
+local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 1, rows = 5, reserve = 1, info = 0 }   -- info: 1 = a line of numbers under the banners (to see what the app and the game do); rows: banners per column before a new column starts; reserve: 1 = the window always has the room of the whole grid (it never has to grow), 0 = it fits what is on screen   -- glyph: 1 = the text as pictures of letters, 0 = DirectWrite (to compare)
 local store = safe(ac.storage, DEFAULTS) or DEFAULTS
 local function cycle(list, cur) for i, v in ipairs(list) do if v == cur then return list[i % #list + 1] end end return list[1] end
 
@@ -121,6 +121,7 @@ local incoming, incomingAt = nil, -1e9   -- the lines a game script sent, and wh
 local drawnAt, aliveAt, langAt, lastLang = -1e9, 0, 0, nil
 local calls = { pending = {}, nextAt = 0, seen = {} }   -- the radio calls to play, one after another
 local audio = { status = "not tried", player = nil }
+local stat = { frames = 0, time = 0, fps = 0, worst = 0, worstNow = 0, created = 0, imgs = 0, imgsLast = 0 }   -- measured by the app itself, from the time the game gives it each frame
 local seenWin = { need = nil, got = nil, drawn = 0, maxDrawn = 0 }   -- what the banners window asked for and what the game gave it (diagnostics)
 
 local DEMO = {
@@ -267,7 +268,7 @@ local function drawGlyphText(x, y, text, kind, size, rgba, reveal, clipped)
     local gx = x + (i - 1) * adv
     if clipped and gx >= x + reveal or (not clipped) and gx + adv > x + reveal then break end
     local code = glyphCode(cp)
-    if code then safe(ui.drawImage, glyphPath(set, code), vec2(gx, y), vec2(gx + gw, y + gh), rgba) end
+    if code then stat.imgs = stat.imgs + 1; safe(ui.drawImage, glyphPath(set, code), vec2(gx, y), vec2(gx + gw, y + gh), rgba) end
   end
 end
 local function useGlyphs() return store.glyph == 1 and FOLDER ~= nil end
@@ -283,6 +284,9 @@ end)
 local function broadcast(key, data) return safe(function() ac.broadcastSharedEvent(key, data) return true end) end
 
 function script.update(dt)
+  local raw = dt or 0
+  stat.frames, stat.time, stat.worstNow = stat.frames + 1, stat.time + raw, math.max(stat.worstNow, raw)
+  if stat.time >= 1 then stat.fps, stat.worst, stat.frames, stat.time, stat.worstNow = stat.frames / stat.time, stat.worstNow, 0, 0, 0 end
   dt = clamp(dt or 0, 0, 0.1)
   clock = clock + dt
   local live = incoming and clock - incomingAt < 1.0
@@ -385,6 +389,11 @@ function script.windowBanners(dt)
   end
   ui.setCursor(x0 + vec2(0, needH))
   ui.dummy(vec2(width, 2))
+  stat.imgsLast, stat.imgs = stat.imgs, 0
+  if store.info == 1 then   -- numbers under the banners: what the app has, what it draws, how fast the game runs it, what window it asked for and got
+    local ws0 = safe(ui.windowSize)
+    ui.text(string.format("entradas=%d  fps=%.0f (peor %.0f ms)  letras/fotograma=%d  pido %dx%d  tengo %s", #entries, stat.fps, stat.worst * 1000, stat.imgsLast, width, needH, ws0 and string.format("%dx%d", ws0.x, ws0.y) or "?"))
+  end
   seenWin.need, seenWin.drawn = { width, needH }, #entries   -- (and what the game really gave the window: it can be less than it asked for)
   seenWin.maxDrawn = math.max(seenWin.maxDrawn, #entries)
   local ws = safe(ui.windowSize)
@@ -418,6 +427,8 @@ function script.windowSettings(dt)
   if ui.button("Por columna: " .. store.rows) then store.rows = cycle(ROWS, store.rows) end
   ui.sameLine()
   if ui.button("Ventana: " .. (store.reserve == 1 and "reservada" or "ajustada")) then store.reserve = 1 - store.reserve end
+  ui.sameLine()
+  if ui.button("Info en pantalla: " .. (store.info == 1 and "on" or "off")) then store.info = 1 - store.info end
   if store.demo > 0 and incoming then   -- a script that sends lines (the real hub, or the probe) has priority over the demo: say so, it looks like the demo is broken
     ui.textColored("AVISO: el demo esta tapado: un script (la sonda?) esta mandando lineas. Cierra la sonda para ver el demo.", rgbm(1, 0.78, 0.2, 1))
   end
@@ -429,7 +440,7 @@ function script.windowSettings(dt)
   ui.text("la ventana de banderas pide " .. (seenWin.need and string.format("%d x %d", seenWin.need[1], seenWin.need[2]) or "-") .. " px y el juego le da " .. (seenWin.got and string.format("%d x %d", seenWin.got[1], seenWin.got[2]) or "?") .. " px")
   ui.text("audio: " .. audio.status)
   ui.text("letras cargadas: " .. preload.ready .. " / " .. #allGlyphs .. " (preguntadas " .. preload.i .. ")")
-  ui.text("fps: " .. tostring(safe(function() return math.floor(ac.getSim().fps + 0.5) end)))
+  ui.text(string.format("fps medidos por la app: %.0f (peor fotograma %.0f ms)", stat.fps, stat.worst * 1000))
   ui.text("lineas de un script: " .. (incoming and "recibiendo" or "ninguna") .. " | ultima hace " .. (incoming and string.format("%.1f s", clock - incomingAt) or "-"))
 end
 
