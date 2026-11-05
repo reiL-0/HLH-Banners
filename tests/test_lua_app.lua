@@ -361,4 +361,37 @@ for _, b in ipairs(bcast) do assert(b[1] ~= "HLH.Banners.alive", "no heartbeat w
 assert(H.parseLines(ALERT) and H.parseLines(ALERT)[1].grp == "alerts" and H.parseLines((ALERT:gsub("grp=alerts", "grp=elsewhere"))) == nil and H.parseLines(FLAG)[1].grp == nil, "grp is one of the known groups or absent")
 assert(H.groupOf("flag-blue") == "alerts" and H.groupOf("danger-ahead") == "alerts" and H.groupOf("track-limits") == "info" and H.groupOf("flag-yellow") == "flags" and H.groupOf("winner") == "flags", "the default group by icon")
 
+-- ---- the delta window: its own event, validated; drawn inside its own area; a demo while nothing arrives so it can be found and moved ---------------------------------------------------------------
+local DOK = "d=-0.31;n=1;sec=7;tol=0.20;cap=0.80;v=72;res=1110111.....0......."
+assert(#DOK:match("res=(.*)") == 20, "(the sample is 20 long)")
+local pd = H.parseDelta(DOK)
+assert(pd and pd.d == -0.31 and pd.n == 1 and pd.sec == 7 and pd.tol == 0.2 and pd.cap == 0.8 and pd.v == 72 and #pd.res == 20, "a good delta payload")
+assert(H.parseDelta("") == false, "an empty string says the VSC is over")
+for _, bad in ipairs({ DOK:gsub("sec=7", "sec=21"), DOK:gsub("d=%-0.31", "d=abc"), DOK:gsub("n=1", "n=99"), DOK:gsub("res=[01%.]+", "res=11"), DOK:gsub("res=[01%.]+", "res=" .. string.rep("x", 20)), DOK:gsub("v=72", "v=-5"), string.rep("a", 300) }) do
+  assert(H.parseDelta(bad) == nil, "refused: " .. tostring(bad):sub(1, 60))
+end
+assert(H.parseDelta(DOK:gsub("d=%-0.31", "d=nan")) == nil, "no NaN")
+local function dframe(dt) script.update(dt); reset(); cur = V(0, 0); depth = 0; script.windowDelta(dt) end
+H.store.demo = 0; H.store.lang = "es"
+dframe(0.05)
+assert(#rec.glyphs == 0 and dummies[1] and dummies[1].x > 100, "no data and no demo: nothing is drawn, but the window keeps its size")
+handlers["HLH.Delta.state"](DOK)
+dframe(0.05)
+local dtext = frameText()
+assert(dtext:find("DELTA7/20", 1, true) and dtext:find("-0.31", 1, true) and dtext:find("REDUCE", 1, true) and dtext:find("AVISOS1/2", 1, true), "the number, the sector, the hint and the strikes are drawn: " .. dtext)
+local Wd, Hd = dummies[1].x, cur.y + 2
+for _, r in ipairs(rec.rects) do assert(r[1].x >= 0 and r[1].y >= 0 and r[2].x <= Wd + 1 and r[2].y <= Hd + 1, "everything inside the window") end
+handlers["HLH.Delta.state"]((DOK:gsub("d=%-0.31", "d=0.60")))
+dframe(0.05)
+assert(frameText():find("+0.60", 1, true) and not frameText():find("REDUCE", 1, true), "positive: slower than the minimum, no warning")
+handlers["HLH.Delta.state"]("")
+dframe(0.05)
+assert(#rec.glyphs == 0, "the VSC is over: the window empties")
+H.store.demo = 1
+dframe(0.05)
+assert(#rec.glyphs > 0 and frameText():find("DELTA", 1, true), "with the demo on, the window shows an example while nothing arrives (so it can be found and moved)")
+handlers["HLH.Delta.state"]("garbage")
+dframe(0.05)
+assert(frameText():find("DELTA", 1, true), "a refused payload changes nothing")
+
 print("lua app ok")

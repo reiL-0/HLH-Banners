@@ -6,7 +6,7 @@
 -- The text is drawn as pictures of letters (font/, a monospace face rendered by tools/make_glyphs.py), not with DirectWrite: the game builds a DirectWrite text the first time it sees it, which made
 -- the text arrive late and apart from the animation (measured in the game); a picture that is already loaded is drawn at once, and its width is exact, so the text unfolds with the panel.
 
-local KEY_LINES, KEY_LANG, KEY_ALIVE = "HLH.Banners.lines", "HLH.Banners.lang", "HLH.Banners.alive"
+local KEY_LINES, KEY_LANG, KEY_ALIVE, KEY_DELTA = "HLH.Banners.lines", "HLH.Banners.lang", "HLH.Banners.alive", "HLH.Delta.state"
 
 local function safe(f, ...)
   local ok, r = pcall(f, ...)
@@ -103,6 +103,19 @@ local function parseLines(payload)
     end
   end
   return out
+end
+
+-- ---- the delta of a VSC in F1 style (its own window): "d=-0.31;n=1;sec=7;tol=0.20;cap=0.80;v=72;res=1110.....0........" -- delta in seconds (positive: slower than the minimum, which is right), strikes, the sector
+-- (1..20), the tolerance and the credit, the speed, and the result of each sector ('1' kept, '0' under the minimum, '.' not driven). An empty string = the VSC is over. Anything else is refused.
+local function parseDelta(payload)
+  if payload == "" then return false end
+  if type(payload) ~= "string" or #payload > 200 then return nil end
+  local f = {}
+  for k, v in payload:gmatch("(%a+)=([^;]*)") do f[k] = v end
+  local d, n, sec, tol, cap, v = tonumber(f.d), tonumber(f.n), tonumber(f.sec), tonumber(f.tol), tonumber(f.cap), tonumber(f.v)
+  if not (d and n and sec and tol and cap and v) or d ~= d or math.abs(d) > 99 or n < 0 or n > 9 or sec < 1 or sec > 20 or tol < 0 or tol > 5 or cap < 0 or cap > 5 or v < 0 or v > 999 then return nil end
+  if type(f.res) ~= "string" or #f.res ~= 20 or f.res:find("[^01%.]") then return nil end
+  return { d = d, n = n, sec = sec, tol = tol, cap = cap, v = v, res = f.res }
 end
 
 -- ---- settings (kept by the game between sessions) ----------------------------------------------------------------------------------------------------------------------------------------
@@ -348,6 +361,14 @@ safe(function()
   end)
 end)
 
+local delta, deltaAt = nil, -1e9   -- what the script last sent for the delta window, and when
+safe(function()
+  ac.onSharedEvent(KEY_DELTA, function(data)
+    local d = parseDelta(data)
+    if d == false then delta = nil elseif d then delta, deltaAt = d, clock end
+  end)
+end)
+
 local function broadcast(key, data) return safe(function() ac.broadcastSharedEvent(key, data) return true end) end
 
 function script.update(dt)
@@ -505,6 +526,53 @@ function script.windowBanners(dt) drawGroup("flags", dt) end
 function script.windowAlerts(dt) drawGroup("alerts", dt) end
 function script.windowInfo(dt) drawGroup("info", dt) end
 
+-- ---- the delta window: the number, a bar from zero, the 20 sectors of the lap and the strikes; the colours say it at a glance (green: slower than the minimum, amber: at the limit, red: under it) ----
+local function deltaDemo(t)   -- (shown while the script sends nothing, so the window can be found and moved: a slow lap, then a fast stretch that earns the two strikes)
+  local ph = t % 24
+  local d = ph < 10 and (0.1 + ph * 0.07) or (0.8 - (ph - 10) * 0.16)
+  d = math.max(-1.1, d)
+  local res = {}
+  for i = 1, 20 do res[i] = i < math.floor(ph / 24 * 20) + 1 and (i > 12 and d < -0.2 and "0" or "1") or "." end
+  return { d = d, n = d < -0.2 and (ph > 18 and 2 or 1) or 0, sec = math.floor(ph / 24 * 20) % 20 + 1, tol = 0.2, cap = 0.8, v = 62, res = table.concat(res) }
+end
+function script.windowDelta(dt)
+  local k = store.scale
+  local x0 = ui.getCursor()
+  local data = delta and clock - deltaAt < 1.0 and delta or nil
+  local W, Hh = 300 * k, 104 * k
+  if not data and store.demo ~= 0 then data = deltaDemo(clock) end
+  if data then
+    local en = store.lang == "en"
+    local col = data.d > 0.15 and { 0.263, 0.627, 0.278 } or data.d >= -data.tol and { 1, 0.757, 0.027 } or { 0.898, 0.224, 0.208 }
+    ui.drawRectFilled(x0, x0 + vec2(W, Hh), rgbm(0.047, 0.047, 0.055, 0.94), 12 * k)
+    pcall(ui.drawRect, x0, x0 + vec2(W, Hh), rgbm(0.165, 0.173, 0.192, 1), 12 * k, nil, 1)
+    drawGlyphText(x0.x + 12 * k, x0.y + 9 * k, string.format("DELTA %d/20", data.sec), "s", 11 * k, rgbm(0.68, 0.71, 0.76, 1), 1e9, false)
+    local num = string.format("%s%.2f", data.d >= 0 and "+" or "-", math.abs(data.d))
+    local size = 36 * k
+    drawGlyphText(x0.x + W - 12 * k - #num * ADV * size, x0.y + 4 * k, num, "t", size, rgbm(col[1], col[2], col[3], 1), 1e9, false)
+    local by = x0.y + 50 * k   -- the bar: zero in the middle, the delta fills one way
+    ui.drawRectFilled(vec2(x0.x + 12 * k, by), vec2(x0.x + W - 12 * k, by + 8 * k), rgbm(0.106, 0.114, 0.133, 1), 4 * k)
+    local mid, half = x0.x + W / 2, (W - 24 * k) / 2
+    local len = clamp(math.abs(data.d) / 1.2, 0, 1) * half
+    ui.drawRectFilled(vec2(data.d >= 0 and mid or mid - len, by), vec2(data.d >= 0 and mid + len or mid, by + 8 * k), rgbm(col[1], col[2], col[3], 1), 4 * k)
+    ui.drawRectFilled(vec2(mid - 1, by - 2 * k), vec2(mid + 1, by + 10 * k), rgbm(1, 1, 1, 0.6), 0)
+    local cw = (W - 24 * k - 19 * 2 * k) / 20   -- the 20 sectors
+    for i = 1, 20 do
+      local r = data.res:sub(i, i)
+      local c = r == "1" and { 0.263, 0.627, 0.278 } or r == "0" and { 0.898, 0.224, 0.208 } or { 0.165, 0.173, 0.2 }
+      local cx = x0.x + 12 * k + (i - 1) * (cw + 2 * k)
+      ui.drawRectFilled(vec2(cx, by + 17 * k), vec2(cx + cw, by + 25 * k), rgbm(c[1], c[2], c[3], 1), 2 * k)
+      if i == data.sec then pcall(ui.drawRect, vec2(cx - 1, by + 16 * k), vec2(cx + cw + 1, by + 26 * k), rgbm(1, 1, 1, 1), 2 * k, nil, 1) end
+    end
+    local hint = data.d < -data.tol and (en and "SLOW DOWN" or "REDUCE") or data.d < 0.15 and (en and "AT THE LIMIT" or "AL LIMITE") or ""
+    drawGlyphText(x0.x + 12 * k, x0.y + 82 * k, hint, "s", 11 * k, rgbm(col[1], col[2], col[3], 1), 1e9, false)
+    local st = (en and "STRIKES " or "AVISOS ") .. data.n .. "/2"
+    drawGlyphText(x0.x + W - 12 * k - #st * ADV * 11 * k, x0.y + 82 * k, st, "s", 11 * k, rgbm(0.68, 0.71, 0.76, 1), 1e9, false)
+  end
+  ui.setCursor(x0 + vec2(0, Hh))
+  ui.dummy(vec2(W, 2))
+end
+
 -- ---- the settings window ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 local WANT = { "ui.pushClipRect", "ui.popClipRect", "ui.drawRect", "ui.drawRectFilled", "ui.drawImage", "ui.isImageReady", "ui.measureDWriteText", "ui.dwriteText", "ui.pushDWriteFont",
                "ui.MediaPlayer", "ui.button", "ac.storage", "ac.onSharedEvent", "ac.broadcastSharedEvent", "ac.getFolder" }
@@ -549,5 +617,5 @@ function script.windowSettings(dt)
   ui.text("lineas de un script: " .. (incoming and "recibiendo" or "ninguna") .. " | ultima hace " .. (incoming and string.format("%.1f s", clock - incomingAt) or "-"))
 end
 
-if _G.__HLH_TEST then _G.__hlh = { groups = groups, groupOf = groupOf, atlasCodeAt = atlasCodeAt, glyphUV = glyphUV, stat = stat, glyphY = glyphY, codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
+if _G.__HLH_TEST then _G.__hlh = { parseDelta = parseDelta, groups = groups, groupOf = groupOf, atlasCodeAt = atlasCodeAt, glyphUV = glyphUV, stat = stat, glyphY = glyphY, codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
                                     KEYS = { KEY_LINES, KEY_LANG, KEY_ALIVE }, cycle = cycle, fullWidth = fullWidth, demoLines = demoLines } end

@@ -31,3 +31,10 @@ id=flag;img=flag-yellow;kind=info;c=1,0.757,0.027;title=AMARILLA;sub=PRECAUCION 
 
 ## What the script may NOT make the app do
 Open a file named by it, build a URL, run anything, write anything. The icon is chosen by name among the files the app ships.
+
+## script -> app: event `HLH.Delta.state` (about every 100 ms while a delta VSC runs; `""` when it is over)
+The delta of a VSC in F1 style, for the app's `delta` window: `d=-0.31;n=1;sec=7;tol=0.20;cap=0.80;v=72;res=1110111.....0.......`
+- `d`: the delta in seconds (positive = slower than the minimum time of the sector, which is right; negative = faster than allowed); `n`: strikes (two in a row in negative = penalty); `sec`: the sector 1..20;
+  `tol`, `cap`: the tolerance and the most credit; `v`: the car's speed in km/h; `res`: 20 characters, one per sector: `1` kept, `0` under the minimum, `.` not driven yet.
+- Anything that does not fit (a number out of range, a `res` that is not 20 of `01.`) is refused and the window keeps what it had. Data older than 1 s is not drawn (the window shows its demo, or nothing).
+
