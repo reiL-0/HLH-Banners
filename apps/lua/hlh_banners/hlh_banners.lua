@@ -126,6 +126,33 @@ local DEMO = {
   es = { flag = { "AMARILLA", "PRECAUCION EN PISTA" }, blue = { "BANDERA AZUL", "DEJA PASAR AL MAS RAPIDO" }, limits = { "LIMITES DE PISTA", "LLEVAS 2/5 - TE QUEDAN 3" }, winner = { "GANADOR", "SOFIA RIOS" } },
   en = { flag = { "YELLOW", "CAUTION ON TRACK" }, blue = { "BLUE FLAG", "LET THE FASTER CAR THROUGH" }, limits = { "TRACK LIMITS", "2/5 - 3 LEFT" }, winner = { "WINNER", "SOFIA RIOS" } },
 }
+-- "varias" (store.demo == 2): eight banners of every kind, one more each second or two. The information ones fold to their icon 5 s after opening and stay as icons, the instructions and the winner keep
+-- their text, so the pile-up and the "only the icon" state are on screen for a long while. A 40 s loop.
+local MANY = {   -- id, icon, kind, colour, text key, from s, until s
+  { "flag", "flag-yellow", "info", { 1, 0.757, 0.027 }, "yellow", 0, 32 },
+  { "track-limits", "track-limits", "info", { 0.361, 0.42, 0.753 }, "limits", 1.5, 33 },
+  { "pits", "pits-closed", "info", { 0.937, 0.325, 0.314 }, "pits", 3, 34 },
+  { "white", "flag-white", "info", { 0.96, 0.96, 0.96 }, "white", 4.5, 35 },
+  { "bw", "flag-bw", "info", { 0.741, 0.741, 0.741 }, "bw", 6, 36 },
+  { "n-blue", "flag-blue", "action", { 0.161, 0.475, 1 }, "blue", 8, 30 },
+  { "owed", "give-back", "action", { 1, 0.439, 0.263 }, "owed", 10, 31 },
+  { "winner", "winner", "sticky", { 1, 0.835, 0.31 }, "winner", 12, 37 },
+}
+local MANY_TEXT = {
+  es = { yellow = { "AMARILLA", "PRECAUCION EN PISTA" }, limits = { "LIMITES DE PISTA", "LLEVAS 2/5 - TE QUEDAN 3" }, pits = { "BOXES CERRADOS", "SOLO CON PERMISO DEL DIRECTOR" }, white = { "BLANCA", "ULTIMA VUELTA" },
+         bw = { "NEGRA Y BLANCA", "ADVERTENCIA DE CONDUCTA" }, blue = { "BANDERA AZUL", "DEJA PASAR AL MAS RAPIDO" }, owed = { "DEVUELVE EL PUESTO", "A ANA - 23 S" }, winner = { "GANADOR", "SOFIA RIOS" } },
+  en = { yellow = { "YELLOW", "CAUTION ON TRACK" }, limits = { "TRACK LIMITS", "2/5 - 3 LEFT" }, pits = { "PITS CLOSED", "DIRECTOR'S PERMISSION ONLY" }, white = { "WHITE", "LAST LAP" },
+         bw = { "BLACK AND WHITE", "CONDUCT WARNING" }, blue = { "BLUE FLAG", "LET THE FASTER CAR THROUGH" }, owed = { "GIVE THE PLACE BACK", "TO ANA - 23 S" }, winner = { "WINNER", "SOFIA RIOS" } },
+}
+local function manyLines(t)
+  local tx = MANY_TEXT[store.lang == "en" and "en" or "es"]
+  local out = {}
+  for _, m in ipairs(MANY) do
+    if t >= m[6] and t < m[7] then out[#out + 1] = { id = m[1], img = m[2], kind = m[3], c = m[4], title = tx[m[5]][1], sub = tx[m[5]][2], ev = m[1] } end
+  end
+  return out
+end
+
 local function demoLines(t)
   local tx = DEMO[store.lang == "en" and "en" or "es"]
   local function ln(id, img, kind, c, key, ev) return { id = id, img = img, kind = kind, c = c, title = tx[key][1], sub = tx[key][2], ev = ev } end
@@ -246,6 +273,7 @@ function script.update(dt)
   local lines
   if live then lines = incoming
   elseif store.demo == 1 then demoT = (demoT + dt) % 26; lines = demoLines(demoT)
+  elseif store.demo == 2 then demoT = (demoT + dt) % 40; lines = manyLines(demoT)
   else lines = {} end
   queueCalls(lines)
   if #calls.pending > 0 and clock >= calls.nextAt then table.remove(calls.pending, 1); calls.nextAt = clock + 0.4; playRadio() end
@@ -335,7 +363,7 @@ end
 
 function script.windowSettings(dt)
   ui.text("HLH Banners (el marco de esta ventana se puede mover; la de las banderas tambien)")
-  if ui.button("Demo: " .. (store.demo == 1 and "on" or "off")) then store.demo = 1 - store.demo end
+  if ui.button("Demo: " .. ({ [0] = "off", "normal", "varias" })[store.demo]) then store.demo = (store.demo + 1) % 3; demoT = 0 end
   ui.sameLine()
   if ui.button("Idioma: " .. store.lang) then store.lang = cycle(LANGS, store.lang) end
   if ui.button("Tamano: " .. math.floor(store.scale * 100 + 0.5) .. "%") then store.scale = cycle(SCALES, store.scale) end

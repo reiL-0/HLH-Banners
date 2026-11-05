@@ -115,6 +115,23 @@ assert(allText:find("PRECAUCIONENPISTA", 1, true), "both lines of text")
 assert(plays >= 4, "a radio call per new banner: " .. plays)
 assert(#rec.images >= 0)
 
+-- the "varias" demo: eight banners pile up, the information ones fold to their icon, the instructions and the winner keep their text
+H.store.demo = 2
+H.store.lang = "es"
+for _ = 1, 100 do frame(0.05) end   -- (past the previous demo's banners: the loop restarts at 0)
+local maxIcons, folded = 0, false
+for _ = 1, 800 do   -- 40 s
+  frame(0.05)
+  local icons = 0
+  for _, src in ipairs(rec.images) do if src:find("/icons/", 1, true) then icons = icons + 1 end end
+  maxIcons = math.max(maxIcons, icons)
+  local txt = frameText()
+  if icons >= 7 and not txt:find("AMARILLA", 1, true) and not txt:find("BOXESCERRADOS", 1, true) and txt:find("BANDERAAZUL", 1, true) and txt:find("GANADOR", 1, true) then folded = true end
+end
+assert(maxIcons >= 8, "eight banners on screen at once: " .. maxIcons)
+assert(folded, "a moment with the information banners as icons only while the instruction and the winner still show their text")
+H.store.demo = 1
+
 -- the language of the settings reaches the demo; sound off = no new calls
 H.store.lang = "en"
 local n0 = plays
