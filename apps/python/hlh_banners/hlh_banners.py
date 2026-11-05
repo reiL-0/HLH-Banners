@@ -366,7 +366,9 @@ def on_render(delta):
     now = time.time()
     state["last_render"] = now
     refresh_settings(now)
-    wx, wy = ac.getPosition(app)
+    # The game draws an app's GL in the WINDOW's own coordinates (0,0 = its corner): adding the window's place on the screen counted it twice, so the banners moved twice as fast as the window
+    # when dragged and their coloured shapes ended outside the window, where the game cuts them. "Origen: abs" in the settings is there in case a game does it the other way.
+    wx, wy = (0.0, 0.0) if cfg["origin"] == "rel" else ac.getPosition(app)
     if cfg["demo"]:
         state["demo_t"] = (state["demo_t"] + delta) % 26.0
     with LOCK:

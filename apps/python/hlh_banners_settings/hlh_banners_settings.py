@@ -24,7 +24,8 @@ def text_of(key):
             "audio": "Probar audio",
             "lang": "Idioma: " + s["lang"],
             "scale": "Tamano: %d%%" % round(s["scale"] * 100),
-            "sound": "Sonido: " + ("off" if s["sound"] == 0 else "%d%%" % s["sound"])}[key]
+            "sound": "Sonido: " + ("off" if s["sound"] == 0 else "%d%%" % s["sound"]),
+            "origin": "Origen: " + s["origin"]}[key]
 
 
 def push():
@@ -63,6 +64,10 @@ def on_scale(*a):
     change(lambda: state.update(scale=hlh_settings.cycle(hlh_settings.SCALES, state["scale"])))
 
 
+def on_origin(*a):
+    change(lambda: state.update(origin=hlh_settings.cycle(hlh_settings.ORIGINS, state["origin"])))
+
+
 def on_sound(*a):
     change(lambda: state.update(sound=hlh_settings.cycle(hlh_settings.VOLUMES, state["sound"])))
 
@@ -71,8 +76,8 @@ def acMain(ac_version):
     global app
     state.update(hlh_settings.load(INI))
     app = ac.newApp("HLH Banners settings")
-    ac.setSize(app, 410, 130)
-    for i, (key, fn) in enumerate((("move", on_move), ("demo", on_demo), ("audio", on_audio), ("lang", on_lang), ("scale", on_scale), ("sound", on_sound))):
+    ac.setSize(app, 410, 160)
+    for i, (key, fn) in enumerate((("move", on_move), ("demo", on_demo), ("audio", on_audio), ("lang", on_lang), ("scale", on_scale), ("sound", on_sound), ("origin", on_origin))):
         b = ac.addButton(app, text_of(key))
         ac.setPosition(b, 10 + (i % 2) * 195, 36 + (i // 2) * 30)
         ac.setSize(b, 185, 26)

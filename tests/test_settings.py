@@ -11,12 +11,12 @@ import hlh_settings as hs  # noqa: E402
 def test_the_settings_survive_a_round_trip_and_garbage_is_the_default():
     p = os.path.join(tempfile.mkdtemp(), "x.ini")
     assert hs.load(p) == hs.DEFAULTS, "no file: the defaults"
-    s = dict(hs.DEFAULTS, lang="en", scale=2.0, sound=40, demo=True, move=True, test=3)
+    s = dict(hs.DEFAULTS, lang="en", scale=2.0, sound=40, demo=True, move=True, test=3, origin="abs")
     hs.save(p, s)
     assert hs.load(p) == s and not os.path.exists(p + ".tmp")
-    open(p, "w").write("[app]\nlang = klingon\nscale = 99\nsound = loud\ndemo = maybe\ntest = -5\n")
+    open(p, "w").write("[app]\nlang = klingon\nscale = 99\nsound = loud\ndemo = maybe\ntest = -5\norigin = ../..\n")
     got = hs.load(p)
-    assert got["lang"] == "auto" and got["scale"] == 1.25 and got["sound"] == 100 and got["demo"] is False and got["test"] == 0, got
+    assert got["lang"] == "auto" and got["scale"] == 1.25 and got["sound"] == 100 and got["demo"] is False and got["test"] == 0 and got["origin"] == "rel", got
     open(p, "w").write("not an ini at all \x00\x01")
     assert hs.load(p) == hs.DEFAULTS, "a broken file never breaks the banners"
 
@@ -41,9 +41,9 @@ def test_the_settings_app_writes_what_the_banners_app_reads():
     sa.acMain(0)
     click = {call.args[0]: call.args[1] for call in fake.addOnClickedListener.call_args_list}   # button id -> handler
     by_key = {k: click[b] for k, b in sa.buttons.items()}
-    by_key["lang"](); by_key["scale"](); by_key["sound"](); by_key["move"](); by_key["demo"](); by_key["audio"]()
+    by_key["lang"](); by_key["scale"](); by_key["sound"](); by_key["move"](); by_key["demo"](); by_key["audio"](); by_key["origin"]()
     got = hs.load(sa.INI)
-    assert got["lang"] == "es" and got["scale"] == 1.5 and got["sound"] == 70 and got["move"] and got["demo"] and got["test"] == 1, got
+    assert got["lang"] == "es" and got["scale"] == 1.5 and got["sound"] == 70 and got["move"] and got["demo"] and got["test"] == 1 and got["origin"] == "abs", got
     by_key["move"]()
     assert hs.load(sa.INI)["move"] is False
     ext = hs.load(sa.INI)

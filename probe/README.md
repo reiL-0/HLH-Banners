@@ -19,11 +19,14 @@ In the game (a practice session alone is enough) enable **HLH Banners** and **HL
 |---|---|---|
 | Settings: **Mover banderas: on** | A grey banner "ARRASTRA AQUI" appears. Drag it where you want the flags. Does it move **exactly with the mouse**, without jumping to strange places? Move it near the edges of the screen too. Then turn it off. | Follows the mouse; the banners stay there |
 | Settings: **Demo: on** | Four banners over 26 s (yellow folds to the icon after 5 s, blue keeps its text, track limits, winner stays). Does the text show inside the capsule, readable and sharp? Does each new banner make a radio sound, one after another, never on top of each other? | Yes |
+| Settings: **Origen** | Leave it on **rel**. Only if the banners still do not follow the window when you drag it, or their colours (border, background, coloured square) are missing, press it to **abs** and tell me which of the two works. | rel works |
 | Settings: **Tamano** | Cycles 75 % ... 300 %. Is the text sharp at the sizes you would use? Does the window keep the banners in place when the size changes (it grows downwards from its corner)? | Sharp up to the size you need |
 | Settings: **Idioma** | auto / es / en. Does the demo text change language straight away? Is the choice kept after restarting AC? | Yes |
 | Settings: **Sonido** | 100 / 70 / 40 % / off. Is 100 % loud enough? Does "off" stop everything, also what was queued? | Yes |
 | Settings: **Probar audio** | One burst and a beep | Yes |
 | closing AC | Does `hlh_banners/probe_result.txt` end with `shutdown: port released`? | Yes |
+
+While the Lua probe app is enabled its yellow flag takes the place of the demo's (it is the script's line; it asks the app for the language, so **Idioma** changes its text too). To see only the demo, close the Lua app.
 
 Then send `hlh_banners/probe_result.txt` and what you saw. A screenshot of the demo and one dragging the banners helps a lot.
 
