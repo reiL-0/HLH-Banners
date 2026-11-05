@@ -9,10 +9,11 @@ local V; V = function(x, y) return setmetatable({ x = x, y = y }, { __add = func
 vec2 = V
 rgbm = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end
 
+local H   -- (the app's exports, filled in once it is loaded; the stand-ins below use it)
 local rec, handlers, bcast, cur, depth, plays, dummies = {}, {}, {}, V(0, 0), 0, 0, {}
 ac = { storage = function(t) return t end, FolderID = { ScriptOrigin = 1 }, getFolder = function() return "/app" end,
        onSharedEvent = function(k, cb) handlers[k] = cb end, broadcastSharedEvent = function(k, d) bcast[#bcast + 1] = { k, d } end }
-local function reset() rec = { rects = {}, texts = {}, images = {}, unclipped = 0, glyphs = {}, unclippedGlyph = 0 }; dummies = {} end
+local function reset() rec = { rects = {}, texts = {}, images = {}, unclipped = 0, glyphs = {}, unclippedGlyph = 0, sources = {}, nsources = 0 }; dummies = {} end
 reset()
 ui = {
   getCursor = function() return cur end, setCursor = function(p) cur = p end,
@@ -23,17 +24,20 @@ ui = {
   dwriteText = function(t) rec.texts[#rec.texts + 1] = t; if depth == 0 then rec.unclipped = rec.unclipped + 1 end end,
   measureDWriteText = function(t, size) return V(#t * size * 0.6, size) end,
   isImageReady = function() return true end,
-  drawImage = function(src)
+  drawImage = function(src, a, b, col, uv1, uv2)
     rec.images[#rec.images + 1] = src
+    if not rec.sources[src] then rec.sources[src] = true; rec.nsources = rec.nsources + 1 end   -- (how many DIFFERENT pictures a frame draws)
     local h = src:match("/font/%w+/(%x+)%.png$")
-    if h then rec.glyphs[#rec.glyphs + 1] = tonumber(h, 16); if depth == 0 then rec.unclippedGlyph = rec.unclippedGlyph + 1 end end
+    local set = src:match("/font/atlas%-(%w+)%.png$")
+    local code = (h and tonumber(h, 16)) or (set and uv1 and H.atlasCodeAt(set, uv1.x, uv1.y))
+    if code then rec.glyphs[#rec.glyphs + 1] = code; if depth == 0 then rec.unclippedGlyph = rec.unclippedGlyph + 1 end end
   end,
   dummy = function(p) dummies[#dummies + 1] = p end,
   MediaPlayer = function() return { setVolume = function() end, setCurrentTime = function() end, play = function() plays = plays + 1 end } end,
   button = function() return false end, text = function() end, sameLine = function() end, separator = function() end,
 }
 assert(loadfile(path))()
-local H = _G.__hlh
+H = _G.__hlh
 local function cpchar(cp) if cp < 128 then return string.char(cp) end return "#" .. cp end
 local function frameText() local t = {} for _, cp in ipairs(rec.glyphs) do t[#t + 1] = cpchar(cp) end return table.concat(t) end   -- the letters drawn this frame (spaces only advance)
 
@@ -131,6 +135,28 @@ end
 assert(maxIcons >= 8, "eight banners on screen at once: " .. maxIcons)
 assert(folded, "a moment with the information banners as icons only while the instruction and the winner still show their text")
 H.store.demo = 1
+
+-- the atlas: a letter's cell, and how many DIFFERENT pictures a frame draws (the game seems to limit them: text from three or four banners at once did not show)
+do
+  local u1, u2 = H.glyphUV("t2", string.byte("A"))
+  assert(u1.x >= 0 and u1.y >= 0 and u2.x <= 1 and u2.y <= 1 and u2.x > u1.x and u2.y > u1.y, "a cell inside the atlas")
+  local function codeOf(set, code) local c1 = H.glyphUV(set, code); return H.atlasCodeAt(set, c1.x, c1.y) end
+  assert(codeOf("t2", 65) == 65 and codeOf("s2", 0xD1) == 0xD1 and codeOf("t4", string.byte("z")) == string.byte("z") and codeOf("s4", 0x20AC) == 0x20AC, "the letter a cell points at")
+  local _, a2 = H.glyphUV("t2", 65)
+  local b1 = H.glyphUV("t2", 66)
+  assert(b1.x > a2.x, "neighbouring cells do not overlap: there is a gutter between them")
+end
+local function distinct(mode)
+  H.store.glyph, H.store.demo, H.store.rows = mode, 2, 12
+  for _ = 1, 100 do frame(0.05) end
+  local most = 0
+  for _ = 1, 800 do frame(0.05); most = math.max(most, rec.nsources) end
+  return most
+end
+local dAtlas, dSingle = distinct(2), distinct(1)
+assert(dAtlas <= 14, "from the atlas a frame draws very few different pictures (2 atlases + the icons): " .. dAtlas)
+assert(dSingle > 30, "one picture per letter draws many (what the game could not take): " .. dSingle)
+H.store.glyph, H.store.rows, H.store.demo = 2, 5, 1
 
 -- columns: with a few rows the banners that do not fit start a new column to the right; with many rows they are one column
 H.store.scale = 1
@@ -235,7 +261,7 @@ for i = 1, 40 do
   for _, t in ipairs(rec.texts) do if t == "NEGRA" then if i * 0.02 < 0.5 then partial = true else full = true end end end
 end
 assert(not partial and full, "DirectWrite without a clip: no text while the panel opens, text once it is open")
-H.store.glyph = 1
+H.store.glyph = 2
 
 -- a letter we have no picture for is drawn as a question mark, and an accent works
 ui.pushClipRect = function(a, b) depth = depth + 1; areas[depth] = (b.x - a.x) * (b.y - a.y); return true end

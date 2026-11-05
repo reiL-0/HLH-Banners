@@ -30,4 +30,14 @@ if __name__ == "__main__":
                 sys.exit("%r: %s" % (c, r.stderr.decode()))
             for out in OUTS[1:]:
                 shutil.copyfile(path, os.path.join(out, name, "%04x.png" % ord(c)))
-    print(len(CHARS), "glyphs x", len(SETS), "sets")
+    # the atlases: ONE picture per set with every letter on a grid (16 columns, 1 px of transparent gutter around each cell, letters in code order). The game seems to limit how many different
+    # pictures a window may draw per frame (measured: text from three or four banners at once did not show), so the app draws all its text from these and picks the letter with texture coordinates.
+    codes = sorted(ord(c) for c in CHARS)
+    for name, pt in SETS.items():
+        cw, ch = math.ceil(0.6 * pt), math.ceil(1.32 * pt)
+        files = [os.path.join(OUTS[0], name, "%04x.png" % c) for c in codes]
+        for out in OUTS:
+            r = subprocess.run(["magick", "montage"] + files + ["-background", "none", "-geometry", "%dx%d+1+1" % (cw, ch), "-tile", "16x", os.path.join(out, "atlas-%s.png" % name)], capture_output=True)
+            if r.returncode:
+                sys.exit("atlas %s: %s" % (name, r.stderr.decode()))
+    print(len(CHARS), "glyphs x", len(SETS), "sets, and the atlases")

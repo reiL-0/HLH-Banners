@@ -53,6 +53,34 @@ def test_every_letter_sits_on_the_same_baseline():
             assert on("."), "a full stop sits on it: " + name
 
 
+def test_the_atlas_has_every_letter_in_its_cell():
+    """One picture per set with every letter on a grid (16 columns, 1 px gutter): the game seems to limit how many different pictures a window draws per frame, so the app draws all text from these."""
+    import math
+    import shutil
+    import subprocess
+    import tempfile
+    magick = shutil.which("magick")
+    if not magick:
+        print("ImageMagick is not installed: the atlases were NOT checked")
+        return
+    codes = sorted(ord(c) for c in glyphs.CHARS)
+    tmp = tempfile.mkdtemp()
+    for out_dir in (HERE, os.path.join(HERE, "..", "..", "lua", "hlh_banners")):
+        for name, pt in glyphs.SETS.items():
+            cw, ch = math.ceil(0.6 * pt), math.ceil(1.32 * pt)
+            atlas = os.path.join(out_dir, "font", "atlas-%s.png" % name)
+            size = subprocess.run([magick, "identify", "-format", "%w %h", atlas], capture_output=True, text=True).stdout.split()
+            assert [int(x) for x in size] == [16 * (cw + 2), math.ceil(len(codes) / 16) * (ch + 2)], "atlas size " + name + " " + str(size)
+            for ch_ in ("A", "\u00d1", ".", "7", "g"):
+                i = codes.index(ord(ch_))
+                x, y = (i % 16) * (cw + 2) + 1, (i // 16) * (ch + 2) + 1
+                cell = os.path.join(tmp, "cell.png")
+                subprocess.run([magick, atlas, "-crop", "%dx%d+%d+%d" % (cw, ch, x, y), "+repage", cell], check=True)
+                single = os.path.join(out_dir, "font", name, "%04x.png" % ord(ch_))
+                diff = subprocess.run([magick, "compare", "-metric", "AE", cell, single, "null:"], capture_output=True, text=True)
+                assert diff.stderr.strip().split()[0] == "0", "the atlas cell of %r in %s is not that letter: %s" % (ch_, name, diff.stderr)
+
+
 def test_the_sharper_set_is_used_when_the_text_is_drawn_bigger():
     assert glyphs.pick("t", 20) == "t2" and glyphs.pick("t", 40) == "t2" and glyphs.pick("t", 41) == "t4" and glyphs.pick("t", 60) == "t4"
     assert glyphs.pick("s", 12) == "s2" and glyphs.pick("s", 24) == "s2" and glyphs.pick("s", 36) == "s4"

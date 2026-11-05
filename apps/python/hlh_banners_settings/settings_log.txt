@@ -39,3 +39,13 @@ OK lang=es demo=on en tmpbih3ugvm
 OK lang=es demo=on en tmpbih3ugvm
 OK lang=en demo=on en tmpbih3ugvm
 ERROR al guardar: PermissionError('read-only')
+OK lang=es demo=off en tmpedv637ny
+OK lang=es demo=off en tmpedv637ny
+OK lang=es demo=off en tmpedv637ny
+OK lang=es demo=off en tmpedv637ny
+OK lang=es demo=on en tmpedv637ny
+OK lang=es demo=on en tmpedv637ny
+OK lang=es demo=on en tmpedv637ny
+OK lang=es demo=on en tmpedv637ny
+OK lang=en demo=on en tmpedv637ny
+ERROR al guardar: PermissionError('read-only')

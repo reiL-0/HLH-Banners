@@ -106,7 +106,9 @@ end
 
 -- ---- settings (kept by the game between sessions) ----------------------------------------------------------------------------------------------------------------------------------------
 local SCALES, VOLUMES, LANGS, ROWS = { 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0 }, { 100, 70, 40, 0 }, { "auto", "es", "en" }, { 3, 4, 5, 6, 8, 12 }
-local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 1, rows = 5, reserve = 1, info = 0 }   -- info: 1 = a line of numbers under the banners (to see what the app and the game do); rows: banners per column before a new column starts; reserve: 1 = the window always has the room of the whole grid (it never has to grow), 0 = it fits what is on screen   -- glyph: 1 = the text as pictures of letters, 0 = DirectWrite (to compare)
+local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 2, rows = 5, reserve = 1, info = 0 }
+-- glyph: 2 = the text from one atlas picture of letters, 1 = one picture per letter, 0 = DirectWrite (to compare); info: 1 = a line of numbers under the banners (what the app and the game do);
+-- rows: banners per column before a new column starts; reserve: 1 = the window always has the room of the whole grid (it never has to grow), 0 = it fits what is on screen
 local store = safe(ac.storage, DEFAULTS) or DEFAULTS
 local function cycle(list, cur) for i, v in ipairs(list) do if v == cur then return list[i % #list + 1] end end return list[1] end
 
@@ -234,28 +236,68 @@ local function glyphPath(set, code)   -- the path of a letter's picture, built o
   if not p then p = FOLDER .. "/font/" .. set .. "/" .. string.format("%04x", code) .. ".png"; t[code] = p end
   return p
 end
+-- The atlas (font/atlas-<set>.png): ONE picture per set with every letter on a grid of 16 columns, each cell with 1 px of transparent gutter around it, letters in code order; a letter is picked with texture
+-- coordinates. Measured in the game: with a picture per letter the text of three or four banners at once did not show (each new banner appeared only when an earlier one folded its text away): the game
+-- seems to limit the different pictures a window draws per frame. From the atlas ALL the text is two pictures, and the letters of a line are drawn with the same texture one after another.
+local ATLAS_COLS = 16
+local codeList, codeIndex = {}, {}
+for c in pairs(KNOWN) do codeList[#codeList + 1] = c end
+table.sort(codeList)
+for i, c in ipairs(codeList) do codeIndex[c] = i - 1 end
+local ATLAS_ROWS = math.ceil(#codeList / ATLAS_COLS)
+local atlasPaths, uvCache = {}, {}
+local function atlasPath(set) local p = atlasPaths[set]; if not p then p = FOLDER .. "/font/atlas-" .. set .. ".png"; atlasPaths[set] = p end return p end
+local function glyphUV(set, code)   -- the two corners (texture coordinates) of a letter's cell
+  local t = uvCache[set]
+  if not t then t = {}; uvCache[set] = t end
+  local u = t[code]
+  if not u then
+    local pt = SETS[set]
+    local cw, ch = math.ceil(ADV * pt), math.ceil(LINE * pt)
+    local pw, ph = cw + 2, ch + 2
+    local i = codeIndex[code]
+    local col, row = i % ATLAS_COLS, math.floor(i / ATLAS_COLS)
+    local aw, ah = ATLAS_COLS * pw, ATLAS_ROWS * ph
+    u = { vec2((col * pw + 1) / aw, (row * ph + 1) / ah), vec2((col * pw + 1 + cw) / aw, (row * ph + 1 + ch) / ah) }
+    t[code] = u
+  end
+  return u[1], u[2]
+end
+local function atlasCodeAt(set, ux, uy)   -- the inverse, for the tests: which letter does a texture coordinate point at
+  local pt = SETS[set]
+  local cw, ch = math.ceil(ADV * pt), math.ceil(LINE * pt)
+  local pw, ph = cw + 2, ch + 2
+  local col, row = math.floor(ux * ATLAS_COLS * pw / pw + 1e-6), math.floor(uy * ATLAS_ROWS * ph / ph + 1e-6)
+  return codeList[row * ATLAS_COLS + col + 1]
+end
+
 local function glyphWidth(text, size) return #codepointsCached(text) * ADV * size end
 -- The letters sit on a common baseline 1.02 em below the top of their picture, capitals 0.73 em tall (measured on the pictures); to put the TOP of the capitals at `capTop` px the picture goes
 -- up by the 0.29 em above them. The capitals of the title start 10 px under the capsule's top, the subtitle's 33 px (as DirectWrite drew them).
 local ASC, CAP = 1.02, 0.73
 local function glyphY(capTop, size) return capTop - (ASC - CAP) * size end
 
-local allGlyphs = {}   -- every picture the app may draw, asked for a few per frame at the start so they are loaded before they are needed
-local function listGlyphs()
+local allGlyphs = {}   -- the pictures the mode in use may draw (and the icons), asked for a few per frame so they are loaded before they are needed
+local ICON_NAMES = { "drive-through-pass", "drive-through-pits", "flag-black", "flag-blue", "flag-bw", "flag-checkered", "flag-fcy", "flag-green", "flag-meatball", "flag-red", "flag-vsc", "flag-white", "flag-yellow",
+                     "flag-yellow2", "free-pass", "give-back", "one-to-go", "pits-closed", "pits-open", "restart-lap", "track-limits", "two-to-go", "wave-around", "winner" }
+local preload = { i = 0, ready = 0, mode = nil }
+local function rebuildPreload()
+  allGlyphs = {}
+  preload.i, preload.ready, preload.mode = 0, 0, store.glyph
   if not FOLDER then return end
-  local codes = {}
-  for c in pairs(KNOWN) do codes[#codes + 1] = c end
-  table.sort(codes)
-  for _, set in ipairs({ "t2", "s2", "t4", "s4" }) do for _, c in ipairs(codes) do allGlyphs[#allGlyphs + 1] = glyphPath(set, c) end end
+  for _, n in ipairs(ICON_NAMES) do allGlyphs[#allGlyphs + 1] = FOLDER .. "/icons/ico-" .. n .. ".png" end
+  if store.glyph == 2 then
+    for _, set in ipairs({ "t2", "s2", "t4", "s4" }) do allGlyphs[#allGlyphs + 1] = atlasPath(set) end
+  elseif store.glyph == 1 then
+    for _, set in ipairs({ "t2", "s2", "t4", "s4" }) do for _, c in ipairs(codeList) do allGlyphs[#allGlyphs + 1] = glyphPath(set, c) end end
+  end
 end
-listGlyphs()
-local preload = { i = 0, ready = 0 }
 local function preloadStep()
+  if preload.mode ~= store.glyph then rebuildPreload() end
   for _ = 1, 24 do
+    if preload.i >= #allGlyphs then return end
     preload.i = preload.i + 1
-    local p = allGlyphs[preload.i]
-    if not p then return end
-    if safe(ui.isImageReady, p) then preload.ready = preload.ready + 1 end   -- (asking starts the loading)
+    if safe(ui.isImageReady, allGlyphs[preload.i]) then preload.ready = preload.ready + 1 end   -- (asking starts the loading)
   end
 end
 
@@ -268,10 +310,18 @@ local function drawGlyphText(x, y, text, kind, size, rgba, reveal, clipped)
     local gx = x + (i - 1) * adv
     if clipped and gx >= x + reveal or (not clipped) and gx + adv > x + reveal then break end
     local code = glyphCode(cp)
-    if code then stat.imgs = stat.imgs + 1; safe(ui.drawImage, glyphPath(set, code), vec2(gx, y), vec2(gx + gw, y + gh), rgba) end
+    if code then
+      stat.imgs = stat.imgs + 1
+      if store.glyph == 2 then
+        local u1, u2 = glyphUV(set, code)
+        safe(ui.drawImage, atlasPath(set), vec2(gx, y), vec2(gx + gw, y + gh), rgba, u1, u2)
+      else
+        safe(ui.drawImage, glyphPath(set, code), vec2(gx, y), vec2(gx + gw, y + gh), rgba)
+      end
+    end
   end
 end
-local function useGlyphs() return store.glyph == 1 and FOLDER ~= nil end
+local function useGlyphs() return (store.glyph == 1 or store.glyph == 2) and FOLDER ~= nil end
 
 -- ---- the game's calls: the hook for the script's lines, and the heartbeat/language we answer with -----------------------------------------------------------------------------------------
 safe(function()
@@ -430,7 +480,7 @@ function script.windowSettings(dt)
   if ui.button("Sonido: " .. (store.sound == 0 and "off" or (store.sound .. "%"))) then store.sound = cycle(VOLUMES, store.sound) end
   ui.sameLine()
   if ui.button("Probar audio") then playRadio() end
-  if ui.button("Texto: " .. (store.glyph == 1 and "imagenes de letras" or "DirectWrite")) then store.glyph = 1 - store.glyph end
+  if ui.button("Texto: " .. ({ [0] = "DirectWrite", "letras sueltas", "atlas de letras" })[store.glyph]) then store.glyph = (store.glyph + 2) % 3 end
   ui.sameLine()
   if ui.button("Por columna: " .. store.rows) then store.rows = cycle(ROWS, store.rows) end
   ui.sameLine()
@@ -452,5 +502,5 @@ function script.windowSettings(dt)
   ui.text("lineas de un script: " .. (incoming and "recibiendo" or "ninguna") .. " | ultima hace " .. (incoming and string.format("%.1f s", clock - incomingAt) or "-"))
 end
 
-if _G.__HLH_TEST then _G.__hlh = { stat = stat, glyphY = glyphY, codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
+if _G.__HLH_TEST then _G.__hlh = { atlasCodeAt = atlasCodeAt, glyphUV = glyphUV, stat = stat, glyphY = glyphY, codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
                                     KEYS = { KEY_LINES, KEY_LANG, KEY_ALIVE }, cycle = cycle, fullWidth = fullWidth, demoLines = demoLines } end
