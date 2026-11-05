@@ -27,7 +27,7 @@ LOCK = threading.Lock()
 app = None
 server = None
 notes = []
-state = {"lines": [], "lines_at": 0.0, "last_render": 0.0, "demo_t": 0.0, "ini_mtime": None, "ini_check": 0.0, "size": None}
+state = {"lines": [], "lines_at": 0.0, "last_render": 0.0, "demo_t": 0.0, "ini_mtime": None, "ini_check": 0.0, "ini_reads": 0, "size": None}
 cfg = {}   # the driver's settings (hlh_settings), refreshed from the file
 stack = None
 glyphs = None
@@ -72,6 +72,9 @@ def refresh_settings(now):
     state["ini_mtime"] = mt
     old = dict(cfg)
     cfg.update(hlh_settings.load(INI))
+    if cfg != old and state["ini_reads"] < 20:
+        state["ini_reads"] += 1
+        note("settings read", "%s -> lang=%s demo=%s move=%s scale=%s sound=%s origin=%s" % (INI, cfg["lang"], cfg["demo"], cfg["move"], cfg["scale"], cfg["sound"], cfg["origin"]))
     if cfg["sound"] == 0:   # sound off: whatever was waiting its turn is dropped, not played later
         del sounds["pending"][:]
     if cfg["sound"] != old.get("sound") and cfg["sound"] > 0:
@@ -362,6 +365,25 @@ def move_line():
     return {"id": "move", "img": "flag-yellow", "kind": "sticky", "c": [0.6, 0.6, 0.6], "title": tx[0], "sub": tx[1], "ev": "move"}
 
 
+def draw_calibration(ox, oy, colors, tag, pos):
+    """Marks to learn how the game places our drawing: three coloured squares (plain GL), the first icon (a picture) and a line of text (glyph pictures), starting at (ox, oy).
+    It is drawn twice, once from the window's own corner and once from the window's place on the screen; the one that lands inside the window is the right way."""
+    for i, c in enumerate(colors):
+        ac.glColor4f(c[0], c[1], c[2], 1.0)
+        quad(ox + 4 + i * 48, oy + 4, 40, 40)
+    tex = icon("flag-yellow")
+    if tex:
+        ac.glColor4f(1, 1, 1, 1)
+        ac.glQuadTextured(ox + 4 + 3 * 48, oy + 4, 40, 40, tex)
+    ac.glColor4f(0, 0, 0, 0.8)
+    quad(ox + 4, oy + 48, 330, 18)
+    draw_text(ox + 6, oy + 49, "%s %s" % (tag, pos), "s", 12.0, (1, 1, 1, 1), 326)
+    ac.glColor4f(0, 0, 0, 0.8)
+    quad(ox + 4, oy + 68, 330, 18)
+    exists = os.path.isfile(INI)
+    draw_text(ox + 6, oy + 69, "INI %s L=%s D=%s" % ("ok" if exists else "NO", cfg["lang"], "on" if cfg["demo"] else "off"), "s", 12.0, (1, 1, 0.4, 1), 326)
+
+
 def on_render(delta):
     now = time.time()
     state["last_render"] = now
@@ -369,6 +391,14 @@ def on_render(delta):
     # The game draws an app's GL in the WINDOW's own coordinates (0,0 = its corner): adding the window's place on the screen counted it twice, so the banners moved twice as fast as the window
     # when dragged and their coloured shapes ended outside the window, where the game cuts them. "Origen: abs" in the settings is there in case a game does it the other way.
     wx, wy = (0.0, 0.0) if cfg["origin"] == "rel" else ac.getPosition(app)
+    if cfg["calib"]:
+        px, py = ac.getPosition(app)
+        pos = "POS %d,%d" % (px, py)
+        draw_calibration(0.0, 0.0, ((1, 0, 0), (0, 1, 0), (0, 0.4, 1)), "REL", pos)       # from the window's own corner: red, green, blue
+        draw_calibration(px, py, ((1, 1, 0), (1, 0, 1), (0, 1, 1)), "ABS", pos)          # from the window's place on the screen: yellow, magenta, cyan
+        if not state.get("calib_noted"):
+            state["calib_noted"] = True
+            note("calibration", "getPosition = (%s, %s), window size %s. Which marks are INSIDE the window: red/green/blue (REL) or yellow/magenta/cyan (ABS)? Are the squares coloured, the icon and the text visible?" % (px, py, state["size"]))
     if cfg["demo"]:
         state["demo_t"] = (state["demo_t"] + delta) % 26.0
     with LOCK:
@@ -402,6 +432,10 @@ def acMain(ac_version):
             call(*args)
         except Exception as e:
             note("window", "%s FAIL %r" % (getattr(call, "__name__", call), e))
+    try:
+        ac.setBackgroundTexture(app, os.path.join(HERE, "blank.png"))   # the game draws this (nothing) instead of its grey box
+    except Exception as e:
+        note("window", "setBackgroundTexture FAIL %r" % (e,))
     size = footprint([], cfg["scale"])
     state["size"] = size
     ac.setSize(app, size[0], size[1])

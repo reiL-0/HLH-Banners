@@ -1,0 +1,11 @@
+OK lang=es demo=off en tmpmfv7or45
+OK lang=es demo=off en tmpmfv7or45
+OK lang=es demo=off en tmpmfv7or45
+OK lang=es demo=off en tmpmfv7or45
+OK lang=es demo=on en tmpmfv7or45
+OK lang=es demo=on en tmpmfv7or45
+OK lang=es demo=on en tmpmfv7or45
+OK lang=es demo=on en tmpmfv7or45
+OK lang=es demo=on en tmpmfv7or45
+OK lang=en demo=on en tmpmfv7or45
+ERROR al guardar: PermissionError('read-only')

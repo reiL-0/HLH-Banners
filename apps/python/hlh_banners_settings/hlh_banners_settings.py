@@ -14,6 +14,7 @@ import hlh_settings
 INI = os.path.join(DISPLAY, "hlh_banners.ini")
 app = None
 buttons = {}
+status = None
 state = dict(hlh_settings.DEFAULTS)
 
 
@@ -25,14 +26,28 @@ def text_of(key):
             "lang": "Idioma: " + s["lang"],
             "scale": "Tamano: %d%%" % round(s["scale"] * 100),
             "sound": "Sonido: " + ("off" if s["sound"] == 0 else "%d%%" % s["sound"]),
-            "origin": "Origen: " + s["origin"]}[key]
+            "origin": "Origen: " + s["origin"],
+            "calib": "Calibrar: " + ("on" if s["calib"] else "off")}[key]
+
+
+def report(text):
+    ac.setText(status, text)
+    try:
+        with open(os.path.join(HERE, "settings_log.txt"), "a") as f:
+            f.write(text + "\n")
+    except Exception:
+        pass
 
 
 def push():
+    """Writes the settings and says what happened: the file is read back, so what the window shows is what the banners app will find (a button used to change its text even if nothing was saved)."""
     try:
         hlh_settings.save(INI, state)
+        back = hlh_settings.load(INI)
+        ok = all(back[k] == state[k] for k in state)
+        report(("OK " if ok else "LEIDO DISTINTO ") + "lang=%s demo=%s en %s" % (back["lang"], "on" if back["demo"] else "off", os.path.basename(os.path.dirname(INI))))
     except Exception as e:
-        ac.log("HLH settings: could not save: " + repr(e))
+        report("ERROR al guardar: " + repr(e)[:80])
     for k in buttons:
         ac.setText(buttons[k], text_of(k))
 
@@ -64,6 +79,10 @@ def on_scale(*a):
     change(lambda: state.update(scale=hlh_settings.cycle(hlh_settings.SCALES, state["scale"])))
 
 
+def on_calib(*a):
+    change(lambda: state.update(calib=not state["calib"]))
+
+
 def on_origin(*a):
     change(lambda: state.update(origin=hlh_settings.cycle(hlh_settings.ORIGINS, state["origin"])))
 
@@ -73,11 +92,14 @@ def on_sound(*a):
 
 
 def acMain(ac_version):
-    global app
+    global app, status
     state.update(hlh_settings.load(INI))
     app = ac.newApp("HLH Banners settings")
-    ac.setSize(app, 410, 160)
-    for i, (key, fn) in enumerate((("move", on_move), ("demo", on_demo), ("audio", on_audio), ("lang", on_lang), ("scale", on_scale), ("sound", on_sound), ("origin", on_origin))):
+    ac.setSize(app, 410, 215)
+    status = ac.addLabel(app, "ajustes: " + INI)
+    ac.setPosition(status, 10, 186)
+    ac.setFontSize(status, 12)
+    for i, (key, fn) in enumerate((("move", on_move), ("demo", on_demo), ("audio", on_audio), ("lang", on_lang), ("scale", on_scale), ("sound", on_sound), ("origin", on_origin), ("calib", on_calib))):
         b = ac.addButton(app, text_of(key))
         ac.setPosition(b, 10 + (i % 2) * 195, 36 + (i // 2) * 30)
         ac.setSize(b, 185, 26)

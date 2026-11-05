@@ -148,6 +148,17 @@ def test_the_banners_app_end_to_end_against_a_stand_in():
     frames(0.2)
     assert len(played) == n0 + 1, "the test button plays the call once"
 
+    # calibration: the same marks from the window's own corner and from the window's place (here 100,100): both sets are drawn, with the position the game reports
+    fake_ac.glVertex2f.reset_mock()
+    settings(scale=1.0, sound=0, calib=True)
+    frames(0.1)
+    xs = [c.args[0] for c in fake_ac.glVertex2f.call_args_list]
+    assert min(xs) < 60 and max(xs) > 100, "marks near the window's corner and marks at its place on the screen"
+    assert any("POS 100,100" in line for line in open(app.RESULT).read().splitlines()) or "calibration" in open(app.RESULT).read(), "what the game reports is written down"
+    assert "settings read" in open(app.RESULT).read(), "what the app finds in the settings file is written down"
+    settings(scale=1.0, sound=0, calib=False)
+    frames(0.1)
+
     slow = socket.create_connection(("127.0.0.1", 28761), timeout=5)
     slow.sendall(b"POST /tick HTTP/1.1\r\nHost: 127.0.0.1:28761\r\n")   # a client that never finishes its request
     assert post("/tick")[0] == 200, "a slow client does not hold up the hub's heartbeat"

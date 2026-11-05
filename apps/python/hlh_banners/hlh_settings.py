@@ -7,7 +7,7 @@ SCALES = (0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0)   # the size of everything the ba
 VOLUMES = (100, 70, 40, 0)                        # the radio call; 0 = off
 LANGS = ("auto", "es", "en")
 ORIGINS = ("rel", "abs")   # where the drawing starts: the window's own corner ("rel", what the game seems to expect) or the window's place on the screen ("abs", in case it does not)
-DEFAULTS = {"lang": "auto", "scale": 1.25, "sound": 100, "demo": False, "move": False, "test": 0, "origin": "rel"}
+DEFAULTS = {"lang": "auto", "scale": 1.25, "sound": 100, "demo": False, "move": False, "test": 0, "origin": "rel", "calib": False}
 # demo: every kind of banner in a loop, for trying things; move: shows a placeholder so the driver can drag the window where the banners should go; test: a counter, +1 = play the call once
 
 
@@ -33,7 +33,7 @@ def load(path):
                 out["sound"] = int(get("sound"))
         except (TypeError, ValueError):
             pass
-        for k in ("demo", "move"):
+        for k in ("demo", "move", "calib"):
             out[k] = get(k) == "on"
         try:
             out["test"] = max(0, min(int(get("test")), 10 ** 9))
@@ -48,7 +48,7 @@ def save(path, s):
     """Writes the whole file at once (a temporary file, then a rename: the other app never reads half of it)."""
     import configparser
     c = configparser.ConfigParser()
-    c["app"] = {"lang": s["lang"], "scale": str(s["scale"]), "sound": str(s["sound"]), "demo": "on" if s["demo"] else "off", "move": "on" if s["move"] else "off", "test": str(s["test"]), "origin": s["origin"]}
+    c["app"] = {"lang": s["lang"], "scale": str(s["scale"]), "sound": str(s["sound"]), "demo": "on" if s["demo"] else "off", "move": "on" if s["move"] else "off", "test": str(s["test"]), "origin": s["origin"], "calib": "on" if s["calib"] else "off"}
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         c.write(f)
