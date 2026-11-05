@@ -252,19 +252,38 @@ assert(codes[0x3F] and codes[0xD1], "an unknown letter becomes '?', an accented 
 local info = {}
 ui.text = function(t) info[#info + 1] = t end
 H.store.info, H.store.demo = 1, 2
-local maxEntries = 0
+for _ = 1, 200 do frame(0.05) end   -- (banners born while the window was not drawn, in the heartbeat test above, would count their wait)
+H.stat.delayMax, H.stat.delay = 0, nil
+local maxEntries, line, delayLine, entryLines = 0, nil, nil, 0
 for _ = 1, 800 do
+  info = {}
   frame(0.05)
-  local n = tonumber((info[#info] or ""):match("entradas=(%d+)"))
-  if n then maxEntries = math.max(maxEntries, n) end
+  for _, t in ipairs(info) do
+    local n = tonumber(t:match("entradas=(%d+)"))
+    if n then maxEntries = math.max(maxEntries, n); line = t end
+    if t:find("retraso creada", 1, true) then delayLine = t end
+  end
+  entryLines = math.max(entryLines, #info - 2)
 end
-local line = info[#info]
-assert(maxEntries >= 8 and line:find("fps=20", 1, true) and line:find("pido ", 1, true), "the info line says how many entries, the frame rate and the window: " .. maxEntries .. " " .. tostring(line))
+assert(maxEntries >= 8 and line:find("fps=20", 1, true) and line:find("pido ", 1, true) and line:find("llamadas a la ventana=20/s", 1, true), "the info line: entries, frame rate, how often the game calls the window, the window: " .. maxEntries .. " " .. tostring(line))
+assert(delayLine and delayLine:find("maximo 0.", 1, true), "a banner is drawn at once after it is created: " .. tostring(delayLine))
+assert(entryLines >= 8, "one line per banner: " .. entryLines)
 info = {}
 H.store.info = 0
 frame(0.05); assert(#info == 0, "nothing is written when it is off")
 H.store.demo = 1
 ui.text = function() end
+
+-- if the game calls the window less often than it updates the app, a banner waits to be drawn: the numbers say so
+H.store.info, H.store.demo = 1, 1
+for _ = 1, 100 do frame(0.05) end
+H.stat.delayMax, H.stat.delay = 0, nil
+for i = 1, 400 do
+  script.update(0.05)
+  if i % 40 == 0 then reset(); cur = V(0, 0); depth = 0; script.windowBanners(0.05) end   -- the window is called once every 2 s
+end
+assert(H.stat.delayMax >= 1.5, "a window called every 2 s makes banners wait: " .. H.stat.delayMax)
+H.store.info = 0
 
 -- the settings window runs and lists what is missing
 local listed = {}

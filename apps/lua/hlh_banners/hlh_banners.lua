@@ -121,7 +121,7 @@ local incoming, incomingAt = nil, -1e9   -- the lines a game script sent, and wh
 local drawnAt, aliveAt, langAt, lastLang = -1e9, 0, 0, nil
 local calls = { pending = {}, nextAt = 0, seen = {} }   -- the radio calls to play, one after another
 local audio = { status = "not tried", player = nil }
-local stat = { frames = 0, time = 0, fps = 0, worst = 0, worstNow = 0, created = 0, imgs = 0, imgsLast = 0 }   -- measured by the app itself, from the time the game gives it each frame
+local stat = { frames = 0, time = 0, fps = 0, worst = 0, worstNow = 0, created = 0, imgs = 0, imgsLast = 0, winCalls = 0, winRate = 0, delay = nil, delayMax = 0 }   -- measured by the app itself, from the time the game gives it each frame
 local seenWin = { need = nil, got = nil, drawn = 0, maxDrawn = 0 }   -- what the banners window asked for and what the game gave it (diagnostics)
 
 local DEMO = {
@@ -286,7 +286,7 @@ local function broadcast(key, data) return safe(function() ac.broadcastSharedEve
 function script.update(dt)
   local raw = dt or 0
   stat.frames, stat.time, stat.worstNow = stat.frames + 1, stat.time + raw, math.max(stat.worstNow, raw)
-  if stat.time >= 1 then stat.fps, stat.worst, stat.frames, stat.time, stat.worstNow = stat.frames / stat.time, stat.worstNow, 0, 0, 0 end
+  if stat.time >= 1 then stat.fps, stat.worst, stat.winRate, stat.frames, stat.time, stat.worstNow, stat.winCalls = stat.frames / stat.time, stat.worstNow, stat.winCalls / stat.time, 0, 0, 0, 0 end
   dt = clamp(dt or 0, 0, 0.1)
   clock = clock + dt
   local live = incoming and clock - incomingAt < 1.0
@@ -299,6 +299,7 @@ function script.update(dt)
   queueCalls(lines)
   if #calls.pending > 0 and clock >= calls.nextAt then table.remove(calls.pending, 1); calls.nextAt = clock + 0.4; playRadio() end
   entries = stackUpdate(stack, lines, dt)
+  for _, e in ipairs(entries) do if not e.born then e.born = clock end end
   preloadStep()
   if clock - aliveAt >= 0.25 then   -- the script keeps drawing the banners itself unless this beats: the window can be hidden or closed
     aliveAt = clock
@@ -327,6 +328,7 @@ local function capWidth(e, k)   -- the width of a capsule as it is drawn right n
 end
 
 local function drawCapsule(e, k, x0)   -- at x0, the top-left of its place in the window (its column and row)
+  if not e.firstDraw then e.firstDraw = clock; stat.delay = e.firstDraw - (e.born or clock); stat.delayMax = math.max(stat.delayMax, stat.delay) end   -- (how long a banner waited from its creation to its first drawing)
   local c, l = e.cap, e.line
   local col = l.c
   local textW = math.max(textWidth(l.title, TITLE * k), textWidth(l.sub, SUB * k)) + 10 * k
@@ -365,6 +367,7 @@ end
 
 function script.windowBanners(dt)
   drawnAt = clock
+  stat.winCalls = stat.winCalls + 1
   local k = store.scale
   local x0 = ui.getCursor()
   local rows = math.max(1, store.rows or 5)
@@ -392,7 +395,12 @@ function script.windowBanners(dt)
   stat.imgsLast, stat.imgs = stat.imgs, 0
   if store.info == 1 then   -- numbers under the banners: what the app has, what it draws, how fast the game runs it, what window it asked for and got
     local ws0 = safe(ui.windowSize)
-    ui.text(string.format("entradas=%d  fps=%.0f (peor %.0f ms)  letras/fotograma=%d  pido %dx%d  tengo %s", #entries, stat.fps, stat.worst * 1000, stat.imgsLast, width, needH, ws0 and string.format("%dx%d", ws0.x, ws0.y) or "?"))
+    ui.text(string.format("entradas=%d  fps=%.0f (peor %.0f ms)  llamadas a la ventana=%.0f/s  letras/fotograma=%d  pido %dx%d  tengo %s", #entries, stat.fps, stat.worst * 1000, stat.winRate, stat.imgsLast, width, needH, ws0 and string.format("%dx%d", ws0.x, ws0.y) or "?"))
+    ui.text(string.format("retraso creada->dibujada: ultimo %.2f s, maximo %.2f s", stat.delay or 0, stat.delayMax))
+    for i, e in ipairs(entries) do   -- one line per banner: where the app puts it and in which state
+      local c = e.cap
+      ui.text(string.format("%d %-12s %-5s w=%.2f pop=%.2f esc=%.2f op=%.2f  col %d fila %d", i, e.id, c.s, c.w, c.pop, c.scale, c.fade, math.floor((i - 1) / rows), (i - 1) % rows))
+    end
   end
   seenWin.need, seenWin.drawn = { width, needH }, #entries   -- (and what the game really gave the window: it can be less than it asked for)
   seenWin.maxDrawn = math.max(seenWin.maxDrawn, #entries)
@@ -444,5 +452,5 @@ function script.windowSettings(dt)
   ui.text("lineas de un script: " .. (incoming and "recibiendo" or "ninguna") .. " | ultima hace " .. (incoming and string.format("%.1f s", clock - incomingAt) or "-"))
 end
 
-if _G.__HLH_TEST then _G.__hlh = { glyphY = glyphY, codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
+if _G.__HLH_TEST then _G.__hlh = { stat = stat, glyphY = glyphY, codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
                                     KEYS = { KEY_LINES, KEY_LANG, KEY_ALIVE }, cycle = cycle, fullWidth = fullWidth, demoLines = demoLines } end
