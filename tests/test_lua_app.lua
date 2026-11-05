@@ -43,6 +43,7 @@ assert(#cps == 6 and cps[1] == 65 and cps[2] == 0xCD and cps[3] == 0xD1 and cps[
 assert(H.pickSet("t", 20) == "t2" and H.pickSet("t", 40) == "t2" and H.pickSet("t", 41) == "t4" and H.pickSet("s", 12) == "s2" and H.pickSet("s", 36) == "s4", "the sharper set for bigger text")
 local gw, gh = H.quadSize("t2", 20)
 assert(gw == 12 and gh == 26.5 and H.glyphWidth("AMARILLA", 20) == 8 * 0.6 * 20, "exact widths: the face is monospace")
+assert(math.abs(H.glyphY(10, 18) + 0.29 * 18 - 10) < 1e-9 and H.glyphY(33, 11) < 33, "the top of the capitals lands where asked: the picture goes up by the room above them")
 
 -- ---- what a script may send ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 local good = "id=flag;img=flag-yellow;kind=info;c=1,0.757,0.027;title=AMARILLA;sub=PRECAUCION EN PISTA;ev=12"

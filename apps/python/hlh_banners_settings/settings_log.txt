@@ -29,3 +29,13 @@ OK lang=es demo=on en tmpvual_jom
 OK lang=es demo=on en tmpvual_jom
 OK lang=en demo=on en tmpvual_jom
 ERROR al guardar: PermissionError('read-only')
+OK lang=es demo=off en tmpbih3ugvm
+OK lang=es demo=off en tmpbih3ugvm
+OK lang=es demo=off en tmpbih3ugvm
+OK lang=es demo=off en tmpbih3ugvm
+OK lang=es demo=on en tmpbih3ugvm
+OK lang=es demo=on en tmpbih3ugvm
+OK lang=es demo=on en tmpbih3ugvm
+OK lang=es demo=on en tmpbih3ugvm
+OK lang=en demo=on en tmpbih3ugvm
+ERROR al guardar: PermissionError('read-only')

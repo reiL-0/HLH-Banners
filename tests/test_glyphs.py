@@ -30,6 +30,29 @@ def test_a_letter_we_have_no_glyph_for_becomes_a_question_mark_not_an_error():
     assert glyphs.layout("Ж", 20, 100) == [(0.0, ord("?"))]
 
 
+def test_every_letter_sits_on_the_same_baseline():
+    """The first version put the ink of each letter against the top of its picture (an accented capital dropped, a full stop jumped to the top). Checked on the pictures with ImageMagick."""
+    import shutil
+    import subprocess
+    magick = shutil.which("magick")
+    if not magick:
+        print("ImageMagick is not installed: the baseline of the letter pictures was NOT checked")
+        return
+
+    def ink(path):   # (top row, bottom row exclusive) of the visible part
+        out = subprocess.run([magick, path, "-trim", "-format", "%Y %h", "info:"], capture_output=True, text=True).stdout.split()
+        return int(out[0]), int(out[0]) + int(out[1])
+    for out_dir in (HERE, os.path.join(HERE, "..", "..", "lua", "hlh_banners")):
+        for name, pt in glyphs.SETS.items():
+            base = round(1.02 * pt)
+            pic = lambda ch: os.path.join(out_dir, "font", name, "%04x.png" % ord(ch))
+            on = lambda ch: abs(ink(pic(ch))[1] - base) <= 1   # (a pixel of rounding in the anti-aliasing; the first version was 10 px off)
+            assert on("H") and on("A") and on("E"), "capitals stand on the baseline: " + name
+            assert on("\u00d1") and on("\u00cd") and ink(pic("\u00d1"))[0] < ink(pic("H"))[0], "an accented capital stands on it too, its accent above the others: " + name
+            assert ink(pic("g"))[1] > base and ink(pic("p"))[1] > base, "descenders go below it: " + name
+            assert on("."), "a full stop sits on it: " + name
+
+
 def test_the_sharper_set_is_used_when_the_text_is_drawn_bigger():
     assert glyphs.pick("t", 20) == "t2" and glyphs.pick("t", 40) == "t2" and glyphs.pick("t", 41) == "t4" and glyphs.pick("t", 60) == "t4"
     assert glyphs.pick("s", 12) == "s2" and glyphs.pick("s", 24) == "s2" and glyphs.pick("s", 36) == "s4"

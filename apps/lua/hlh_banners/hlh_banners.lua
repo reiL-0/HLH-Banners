@@ -190,6 +190,10 @@ local function pickSet(kind, size) return size <= SETS[kind .. "2"] and (kind ..
 local function quadSize(set, size) local pt = SETS[set] return math.ceil(ADV * pt) * size / pt, math.ceil(LINE * pt) * size / pt end
 local function glyphPath(set, code) return FOLDER .. "/font/" .. set .. "/" .. string.format("%04x", code) .. ".png" end
 local function glyphWidth(text, size) return #codepoints(text) * ADV * size end
+-- The letters sit on a common baseline 1.02 em below the top of their picture, capitals 0.73 em tall (measured on the pictures); to put the TOP of the capitals at `capTop` px the picture goes
+-- up by the 0.29 em above them. The capitals of the title start 10 px under the capsule's top, the subtitle's 33 px (as DirectWrite drew them).
+local ASC, CAP = 1.02, 0.73
+local function glyphY(capTop, size) return capTop - (ASC - CAP) * size end
 
 local allGlyphs = {}   -- every picture the app may draw, asked for a few per frame at the start so they are loaded before they are needed
 local function listGlyphs()
@@ -256,7 +260,7 @@ end
 
 -- ---- drawing: ImGui through CSP's ui.*, inside the window's own area -----------------------------------------------------------------------------------------------------------------------------
 local PAD, BADGE, CAPH, GAP, RAD = 6, 44, 56, 10, 14
-local TITLE, SUB = 20, 12
+local TITLE, SUB = 18, 11   -- the sizes DirectWrite used: the face is monospace (0.6 em), so a text is exactly as wide in letters as it was in DirectWrite
 local function haveClip() return type(ui.pushClipRect) == "function" and type(ui.popClipRect) == "function" end
 local function textWidth(text, size)
   if useGlyphs() then return glyphWidth(text, size) end   -- exact: the face is monospace
@@ -291,8 +295,8 @@ local function drawCapsule(e, k)   -- at the cursor; moves the cursor down
     local t2 = vec2(p2.x - 4, p2.y)
     local clipped = haveClip() and safe(ui.pushClipRect, t1, t2, true)
     if useGlyphs() then
-      drawGlyphText(t1.x, p1.y + 4 * k, l.title, "t", TITLE * k, rgbm(1, 1, 1, fade), tw - 4 * k, clipped)
-      drawGlyphText(t1.x, p1.y + 33 * k, l.sub, "s", SUB * k, rgbm(0.68, 0.71, 0.76, fade), tw - 4 * k, clipped)
+      drawGlyphText(t1.x, p1.y + glyphY(10, TITLE) * k, l.title, "t", TITLE * k, rgbm(1, 1, 1, fade), tw - 4 * k, clipped)
+      drawGlyphText(t1.x, p1.y + glyphY(33, SUB) * k, l.sub, "s", SUB * k, rgbm(0.68, 0.71, 0.76, fade), tw - 4 * k, clipped)
     elseif clipped or c.w >= 0.999 then
       local pushed = FONT and safe(ui.pushDWriteFont, FONT)
       ui.setCursor(t1 + vec2(0, 5 * k))
@@ -350,5 +354,5 @@ function script.windowSettings(dt)
   ui.text("lineas de un script: " .. (incoming and "recibiendo" or "ninguna") .. " | ultima hace " .. (incoming and string.format("%.1f s", clock - incomingAt) or "-"))
 end
 
-if _G.__HLH_TEST then _G.__hlh = { codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
+if _G.__HLH_TEST then _G.__hlh = { glyphY = glyphY, codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
                                     KEYS = { KEY_LINES, KEY_LANG, KEY_ALIVE }, cycle = cycle, fullWidth = fullWidth, demoLines = demoLines } end
