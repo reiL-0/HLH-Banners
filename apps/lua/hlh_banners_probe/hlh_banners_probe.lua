@@ -36,3 +36,25 @@ end
 function script.windowMain(dt)
   ui.text(shown)
 end
+
+-- The frameless window: a capsule drawn with the calls the hub uses (rounded rectangles, a border, a clipped text), to see in the game (a) that the window has no frame at all and
+-- (b) that those calls draw what they should. Static: only to look at.
+local function safe(f, ...) local ok, r = pcall(f, ...); if ok then return r end return nil end
+function script.windowBanner(dt)
+  local c = ui.getCursor()
+  local W, H = 380, 56
+  local col = rgbm(1, 0.757, 0.027, 1)
+  local steps = {}
+  steps[#steps + 1] = safe(ui.drawRectFilled, c, c + vec2(W, H), rgbm(0.047, 0.047, 0.055, 0.94), 14)
+  steps[#steps + 1] = safe(ui.drawRect, c, c + vec2(W, H), col, 14, nil, 2)
+  steps[#steps + 1] = safe(ui.drawRectFilled, c + vec2(6, 6), c + vec2(50, 50), col, 11)
+  if safe(ui.pushClipRect, c + vec2(60, 0), c + vec2(60 + 200, H), true) then   -- the text inside a clip: only 200 px of it can show
+    ui.setCursor(c + vec2(60, 8))
+    safe(ui.dwriteText, "AMARILLA - TEXTO MUY LARGO QUE SE RECORTA", 18, rgbm(1, 1, 1, 1))
+    ui.setCursor(c + vec2(60, 31))
+    safe(ui.dwriteText, "frameless Lua window", 11, rgbm(0.68, 0.71, 0.76, 1))
+    ui.popClipRect()
+  end
+  ui.setCursor(c + vec2(0, H))
+  ui.dummy(vec2(W, 4))   -- (keeps the window's size: it fits its content)
+end

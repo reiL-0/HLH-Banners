@@ -38,6 +38,12 @@ Its small window must say `probe v2 (follows the language) sending lang=... | ti
 If it does not say `probe v2`, the old Lua folder is still installed (delete it and copy the new one: the old one sends Spanish whatever you choose).
 If the Lua app does not show in the app bar, tell me: its manifest was written from memory of how CSP apps are described.
 
+
+## A frameless window, the way the documentation says (Lua)
+The Lua app now has a **second window**, "HLH Banner (frameless test)": its manifest uses the official window flags `NO_BACKGROUND`, `NO_TITLE_BAR` and `AUTO_RESIZE`
+([CSP Lua apps wiki](https://github.com/ac-custom-shaders-patch/acc-lua-sdk/wiki/Lua-apps)). Enable it in the app bar. Look for: **no grey box, no title** at any time (also with the mouse visible, and while you move it),
+a yellow-bordered capsule with a yellow square, and the text **cut at 200 px** ("AMARILLA - TEXTO MUY LARGO..." must not overflow). That is the same drawing the hub does with ImGui calls, so it also tests them.
+
 ## If something fails
 - `import socket FAIL` in `probe_result.txt`: copy a 32-bit Python 3.3 `Lib` into `hlh_banners/stdlib/`.
 - Text too small/blurry: pick a bigger size; at 250 % and above the app uses a sharper set of letters.
