@@ -156,6 +156,25 @@ assert(x12 < 30 and n12 >= 8 and h12 >= 7 * 64, "twelve rows: a single column of
 assert(w3 > w12, "two or three columns are wider than one")
 H.store.scale, H.store.rows, H.store.demo = 1.25, 5, 1
 
+-- the window never has to grow: with the room reserved its size is the same on every frame (a banner drawn outside the window is cut by the game until it grows); fitted, it changes with the banners
+local function sizes(reserve)
+  H.store.reserve, H.store.demo, H.store.rows = reserve, 2, 5
+  for _ = 1, 100 do frame(0.05) end
+  local seenSizes, n, covered = {}, 0, true
+  for _ = 1, 800 do
+    frame(0.05)
+    local key = math.floor(dummies[1].x) .. "x" .. math.floor(cur.y)
+    if not seenSizes[key] then seenSizes[key] = true; n = n + 1 end
+    for _, r in ipairs(rec.rects) do if r[2].x > dummies[1].x + 1e-6 or r[2].y > cur.y + 2 then covered = false end end
+  end
+  return n, covered
+end
+local nRes, covRes = sizes(1)
+assert(nRes == 1 and covRes, "reserved: one size on every frame, and it covers everything drawn: " .. nRes)
+local nFit = sizes(0)
+assert(nFit > 3, "fitted: the size follows the banners: " .. nFit)
+H.store.reserve, H.store.rows, H.store.demo = 1, 5, 1
+
 -- the language of the settings reaches the demo; sound off = no new calls
 H.store.lang = "en"
 local n0 = plays

@@ -106,7 +106,7 @@ end
 
 -- ---- settings (kept by the game between sessions) ----------------------------------------------------------------------------------------------------------------------------------------
 local SCALES, VOLUMES, LANGS, ROWS = { 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0 }, { 100, 70, 40, 0 }, { "auto", "es", "en" }, { 3, 4, 5, 6, 8, 12 }
-local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 1, rows = 5 }   -- rows: banners per column before a new column starts   -- glyph: 1 = the text as pictures of letters, 0 = DirectWrite (to compare)
+local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 1, rows = 5, reserve = 1 }   -- rows: banners per column before a new column starts; reserve: 1 = the window always has the room of the whole grid (it never has to grow), 0 = it fits what is on screen   -- glyph: 1 = the text as pictures of letters, 0 = DirectWrite (to compare)
 local store = safe(ac.storage, DEFAULTS) or DEFAULTS
 local function cycle(list, cur) for i, v in ipairs(list) do if v == cur then return list[i % #list + 1] end end return list[1] end
 
@@ -375,6 +375,14 @@ function script.windowBanners(dt)
   end
   width = math.max(width, 330 * k * (#entries == 0 and 1 or 0), 60 * k)
   local needH = math.min(math.max(1, #entries), rows) * slot
+  if store.reserve == 1 then
+    -- A banner drawn outside the window's rectangle is cut by the game until the window has grown, so a new banner could open (0.55 s) unseen and appear all at once: the window has the room of the
+    -- whole grid from the start (the rows of a column, and as many columns as the most banners a script may send need), and its size does not follow the unfolding text either.
+    local fullW = 400 * k
+    for _, e in ipairs(entries) do fullW = math.max(fullW, fullWidth(e.line, k)) end
+    local cols = math.max(1, math.ceil(MAX_LINES / rows))
+    width, needH = cols * fullW + (cols - 1) * 10 * k, rows * slot
+  end
   ui.setCursor(x0 + vec2(0, needH))
   ui.dummy(vec2(width, 2))
   seenWin.need, seenWin.drawn = { width, needH }, #entries   -- (and what the game really gave the window: it can be less than it asked for)
@@ -408,6 +416,8 @@ function script.windowSettings(dt)
   if ui.button("Texto: " .. (store.glyph == 1 and "imagenes de letras" or "DirectWrite")) then store.glyph = 1 - store.glyph end
   ui.sameLine()
   if ui.button("Por columna: " .. store.rows) then store.rows = cycle(ROWS, store.rows) end
+  ui.sameLine()
+  if ui.button("Ventana: " .. (store.reserve == 1 and "reservada" or "ajustada")) then store.reserve = 1 - store.reserve end
   if store.demo > 0 and incoming then   -- a script that sends lines (the real hub, or the probe) has priority over the demo: say so, it looks like the demo is broken
     ui.textColored("AVISO: el demo esta tapado: un script (la sonda?) esta mandando lineas. Cierra la sonda para ver el demo.", rgbm(1, 0.78, 0.2, 1))
   end
