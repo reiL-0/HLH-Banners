@@ -3,6 +3,8 @@
 -- language and a heartbeat. Without lines it can run a demo of every kind of banner. DRAFT: written from the CSP Lua documentation; none of it has run in the game yet, and the settings window
 -- lists which game functions exist so the first session tells what works.
 --   banner kinds: "info" folds its text to the icon after 5 s, "action" keeps it while it applies, "sticky" stays until the script stops sending it.
+-- The text is drawn as pictures of letters (font/, a monospace face rendered by tools/make_glyphs.py), not with DirectWrite: the game builds a DirectWrite text the first time it sees it, which made
+-- the text arrive late and apart from the animation (measured in the game); a picture that is already loaded is drawn at once, and its width is exact, so the text unfolds with the panel.
 
 local KEY_LINES, KEY_LANG, KEY_ALIVE = "HLH.Banners.lines", "HLH.Banners.lang", "HLH.Banners.alive"
 
@@ -16,20 +18,16 @@ local function clamp(x, lo, hi) if x < lo then return lo elseif x > hi then retu
 -- ---- the capsule's animation: a state machine advanced by the time between frames (the same as the hub's and the tested Python one) ---------------------------------------------------
 -- open (the icon pops 0.4 -> 1.05 -> 1 while the text unfolds to the right) -> text -> [fold: an "info" banner's text folds after 5 s] -> icon -> close (the badge shrinks to 0.2 and fades).
 -- A banner removed while its text is out folds the text FIRST (shut), so no text is ever left on its own and the icon only shrinks when the text is gone.
-local CAP_T, TEXT_SEC, PREP = { open = 0.55, shut = 0.4, close = 0.32 }, 5, 0.15
+local CAP_T, TEXT_SEC = { open = 0.55, shut = 0.4, close = 0.32 }, 5
 local function easeOut(t) t = clamp(t, 0, 1) return 1 - (1 - t) ^ 3 end
 local function easeIn(t) t = clamp(t, 0, 1) return t * t end
 local function popScale(t) if t < 0.6 then return 0.4 + 0.65 * easeOut(t / 0.6) end return 1.05 - 0.05 * easeOut((t - 0.6) / 0.4) end
--- prep: (optional) the game builds a text the first time it sees it, so a new banner first draws its text unseen for PREP seconds, then opens: the text is ready when the unfolding starts.
-local function newCap(prep) return { s = (prep or 0) > 0 and "prep" or "open", prep = prep or 0, t = 0, age = 0, w = 0, pop = 0.4, scale = 1, fade = (prep or 0) > 0 and 0 or 1 } end
+local function newCap() return { s = "open", t = 0, age = 0, w = 0, pop = 0.4, scale = 1, fade = 1 } end
 local function capStep(c, dt, want, kind)   -- false once the capsule is gone
   c.t = c.t + dt
   if want and (c.s == "shut" or c.s == "close") then c.s, c.t, c.scale, c.fade = "open", 0, 1, 1 end
   local s = c.s
-  if s == "prep" then
-    c.w, c.pop, c.fade = 0, 0.4, 0
-    if c.t >= c.prep then c.s, c.t, c.fade = "open", 0, 1 end
-  elseif s == "open" then
+  if s == "open" then
     local p = c.t / CAP_T.open
     c.w, c.pop, c.scale, c.fade = easeOut(p), popScale(p), 1, 1
     if p >= 1 then c.s, c.t, c.age, c.w, c.pop = "text", 0, 0, 1, 1 end
@@ -55,7 +53,7 @@ end
 
 -- ---- the stack: the capsules on screen. A line that is gone keeps its entry while it closes; two lines with the same id (two cuts seconds apart): the newest wins ---------------------------
 local function newStack() return { caps = {}, order = {} } end
-local function stackUpdate(st, lines, dt, prep)
+local function stackUpdate(st, lines, dt)
   local want, ids = {}, {}
   for _, l in ipairs(lines) do
     if not want[l.id] then ids[#ids + 1] = l.id end
@@ -64,11 +62,11 @@ local function stackUpdate(st, lines, dt, prep)
   for _, id in ipairs(ids) do
     local l = want[id]
     local e = st.caps[id]
-    if not e then e = { id = id, cap = newCap(prep) }; st.caps[id] = e; st.order[#st.order + 1] = id end
+    if not e then e = { id = id, cap = newCap() }; st.caps[id] = e; st.order[#st.order + 1] = id end
     if e.img ~= l.img or (l.ev and l.ev ~= e.ev) then   -- another banner in the same place, or a new event of it: it opens again
       local fresh = e.img ~= nil
       e.img, e.ev = l.img, l.ev
-      if fresh and (e.cap.s == "text" or e.cap.s == "icon" or e.cap.s == "fold") then e.cap = newCap(prep); e.isNew = true end
+      if fresh and (e.cap.s == "text" or e.cap.s == "icon" or e.cap.s == "fold") then e.cap = newCap(); e.isNew = true end
       if not fresh then e.isNew = true end
     end
     e.line = l
@@ -108,12 +106,12 @@ end
 
 -- ---- settings (kept by the game between sessions) ----------------------------------------------------------------------------------------------------------------------------------------
 local SCALES, VOLUMES, LANGS = { 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0 }, { 100, 70, 40, 0 }, { "auto", "es", "en" }
-local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, prep = 1, font = 1 }   -- prep: draw a new text unseen before the banner opens; font: 1 = the app's own typeface, 0 = the game's
+local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 1 }   -- glyph: 1 = the text as pictures of letters, 0 = DirectWrite (to compare)
 local store = safe(ac.storage, DEFAULTS) or DEFAULTS
 local function cycle(list, cur) for i, v in ipairs(list) do if v == cur then return list[i % #list + 1] end end return list[1] end
 
 local FOLDER = safe(function() return ac.getFolder(ac.FolderID.ScriptOrigin) end)   -- the app's own folder (icons, typeface, radio sound)
-local FONT_OWN = FOLDER and ("JetBrains Mono:" .. FOLDER .. "/fonts/JetBrainsMono-ExtraBold.ttf") or nil
+local FONT = FOLDER and ("JetBrains Mono:" .. FOLDER .. "/fonts/JetBrainsMono-ExtraBold.ttf") or nil
 
 -- ---- state ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 local clock, demoT = 0, 0
@@ -165,6 +163,67 @@ local function queueCalls(lines)
   for id in pairs(seen) do if not ids[id] then seen[id] = nil end end
 end
 
+-- ---- text as pictures of letters --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- font/<set>/<code in hex, 4 digits>.png: white letters on transparent, one picture per character, made at twice (t2, s2) or four times (t4, s4) the size they are drawn at. A monospace face: every letter
+-- advances 0.6 em, so the width of a text is exact and it can be revealed letter by letter. The same files and layout as the Python draft (glyphs.py).
+local ADV, LINE = 0.6, 1.32
+local SETS = { t2 = 40, s2 = 24, t4 = 80, s4 = 48 }   -- set -> the pointsize it was rendered at
+local KNOWN = {}
+for c = 33, 126 do if c ~= 92 then KNOWN[c] = true end end
+local function codepoints(s)   -- UTF-8 -> code points (what the manager writes has accents: "LÍMITES", "POSICIÓN")
+  local out, i, n = {}, 1, #s
+  while i <= n do
+    local b = s:byte(i)
+    local cp, len = 0x3F, 1
+    if b < 0x80 then cp = b
+    elseif b >= 0xC2 and b < 0xE0 then cp, len = (b - 0xC0) * 64 + ((s:byte(i + 1) or 0x80) - 0x80), 2
+    elseif b >= 0xE0 and b < 0xF0 then cp, len = (b - 0xE0) * 4096 + ((s:byte(i + 1) or 0x80) - 0x80) * 64 + ((s:byte(i + 2) or 0x80) - 0x80), 3
+    elseif b >= 0xF0 then len = 4 end
+    out[#out + 1] = cp
+    i = i + len
+  end
+  return out
+end
+for _, cp in ipairs(codepoints("áéíóúüñÁÉÍÓÚÜÑ¿¡·°ºªçÇàèìòùâêîôûäëïöÿÀÈÌÒÙÂÊÎÔÛÄËÏÖ€")) do KNOWN[cp] = true end
+local function glyphCode(cp) if cp == 32 then return nil end return KNOWN[cp] and cp or 0x3F end   -- a space only advances; a letter we have no picture for is a "?"
+local function pickSet(kind, size) return size <= SETS[kind .. "2"] and (kind .. "2") or (kind .. "4") end
+local function quadSize(set, size) local pt = SETS[set] return math.ceil(ADV * pt) * size / pt, math.ceil(LINE * pt) * size / pt end
+local function glyphPath(set, code) return FOLDER .. "/font/" .. set .. "/" .. string.format("%04x", code) .. ".png" end
+local function glyphWidth(text, size) return #codepoints(text) * ADV * size end
+
+local allGlyphs = {}   -- every picture the app may draw, asked for a few per frame at the start so they are loaded before they are needed
+local function listGlyphs()
+  if not FOLDER then return end
+  local codes = {}
+  for c in pairs(KNOWN) do codes[#codes + 1] = c end
+  table.sort(codes)
+  for _, set in ipairs({ "t2", "s2", "t4", "s4" }) do for _, c in ipairs(codes) do allGlyphs[#allGlyphs + 1] = glyphPath(set, c) end end
+end
+listGlyphs()
+local preload = { i = 0, ready = 0 }
+local function preloadStep()
+  for _ = 1, 24 do
+    preload.i = preload.i + 1
+    local p = allGlyphs[preload.i]
+    if not p then return end
+    if safe(ui.isImageReady, p) then preload.ready = preload.ready + 1 end   -- (asking starts the loading)
+  end
+end
+
+-- the text at (x, y) as letters; only what falls inside `reveal` px is drawn (a clip rectangle cuts the last, partial letter; without one only whole letters are drawn)
+local function drawGlyphText(x, y, text, kind, size, rgba, reveal, clipped)
+  local set = pickSet(kind, size)
+  local gw, gh = quadSize(set, size)
+  local adv = ADV * size
+  for i, cp in ipairs(codepoints(text)) do
+    local gx = x + (i - 1) * adv
+    if clipped and gx >= x + reveal or (not clipped) and gx + adv > x + reveal then break end
+    local code = glyphCode(cp)
+    if code then safe(ui.drawImage, glyphPath(set, code), vec2(gx, y), vec2(gx + gw, y + gh), rgba) end
+  end
+end
+local function useGlyphs() return store.glyph == 1 and FOLDER ~= nil end
+
 -- ---- the game's calls: the hook for the script's lines, and the heartbeat/language we answer with -----------------------------------------------------------------------------------------
 safe(function()
   ac.onSharedEvent(KEY_LINES, function(data)
@@ -186,7 +245,8 @@ function script.update(dt)
   else lines = {} end
   queueCalls(lines)
   if #calls.pending > 0 and clock >= calls.nextAt then table.remove(calls.pending, 1); calls.nextAt = clock + 0.4; playRadio() end
-  entries = stackUpdate(stack, lines, dt, store.prep == 1 and PREP or 0)
+  entries = stackUpdate(stack, lines, dt)
+  preloadStep()
   if clock - aliveAt >= 0.25 then   -- the script keeps drawing the banners itself unless this beats: the window can be hidden or closed
     aliveAt = clock
     if clock - drawnAt < 0.5 then broadcast(KEY_ALIVE, string.format("%.2f", clock)) end
@@ -196,9 +256,10 @@ end
 
 -- ---- drawing: ImGui through CSP's ui.*, inside the window's own area -----------------------------------------------------------------------------------------------------------------------------
 local PAD, BADGE, CAPH, GAP, RAD = 6, 44, 56, 10, 14
-local TITLE, SUB = 18, 11
+local TITLE, SUB = 20, 12
 local function haveClip() return type(ui.pushClipRect) == "function" and type(ui.popClipRect) == "function" end
 local function textWidth(text, size)
+  if useGlyphs() then return glyphWidth(text, size) end   -- exact: the face is monospace
   local w = safe(function() return ui.measureDWriteText(text, size).x end)
   return w or (#text * size * 0.62)
 end
@@ -210,19 +271,6 @@ local function drawCapsule(e, k)   -- at the cursor; moves the cursor down
   local c, l = e.cap, e.line
   local col = l.c
   local x0 = ui.getCursor()
-  if c.s == "prep" then   -- nothing is seen yet: the text is drawn once inside a 1 px clip at almost no opacity, so the game builds it now and not while the banner unfolds
-    if haveClip() and safe(ui.pushClipRect, x0, x0 + vec2(1, 1), true) then
-      local pushed = store.font == 1 and FONT_OWN and safe(ui.pushDWriteFont, FONT_OWN)
-      ui.setCursor(x0)
-      safe(ui.dwriteText, l.title, TITLE * k, rgbm(1, 1, 1, 0.02))
-      ui.setCursor(x0)
-      if l.sub ~= "" then safe(ui.dwriteText, l.sub, SUB * k, rgbm(1, 1, 1, 0.02)) end
-      if pushed then safe(ui.popDWriteFont) end
-      ui.popClipRect()
-    end
-    ui.setCursor(x0 + vec2(0, (CAPH + 8) * k))
-    return
-  end
   local textW = math.max(textWidth(l.title, TITLE * k), textWidth(l.sub, SUB * k)) + 10 * k
   local tw = textW * c.w
   local sc, fade = c.scale, c.fade
@@ -242,8 +290,11 @@ local function drawCapsule(e, k)   -- at the cursor; moves the cursor down
     local t1 = p1 + vec2((PAD + BADGE + GAP) * k, 0)
     local t2 = vec2(p2.x - 4, p2.y)
     local clipped = haveClip() and safe(ui.pushClipRect, t1, t2, true)
-    if clipped or c.w >= 0.999 then
-      local pushed = store.font == 1 and FONT_OWN and safe(ui.pushDWriteFont, FONT_OWN)
+    if useGlyphs() then
+      drawGlyphText(t1.x, p1.y + 4 * k, l.title, "t", TITLE * k, rgbm(1, 1, 1, fade), tw - 4 * k, clipped)
+      drawGlyphText(t1.x, p1.y + 33 * k, l.sub, "s", SUB * k, rgbm(0.68, 0.71, 0.76, fade), tw - 4 * k, clipped)
+    elseif clipped or c.w >= 0.999 then
+      local pushed = FONT and safe(ui.pushDWriteFont, FONT)
       ui.setCursor(t1 + vec2(0, 5 * k))
       safe(ui.dwriteText, l.title, TITLE * k, rgbm(1, 1, 1, fade))
       ui.setCursor(t1 + vec2(0, 30 * k))
@@ -288,17 +339,16 @@ function script.windowSettings(dt)
   if ui.button("Sonido: " .. (store.sound == 0 and "off" or (store.sound .. "%"))) then store.sound = cycle(VOLUMES, store.sound) end
   ui.sameLine()
   if ui.button("Probar audio") then playRadio() end
-  if ui.button("Precalentar texto: " .. (store.prep == 1 and "on" or "off")) then store.prep = 1 - store.prep end
-  ui.sameLine()
-  if ui.button("Fuente: " .. (store.font == 1 and "JetBrains (propia)" or "del juego")) then store.font = 1 - store.font end
+  if ui.button("Texto: " .. (store.glyph == 1 and "imagenes de letras" or "DirectWrite")) then store.glyph = 1 - store.glyph end
   ui.separator()
   ui.text("Diagnostico (que ofrece el juego):")
   for _, name in ipairs(WANT) do ui.text("  " .. name .. ": " .. (has(name) and "si" or "NO")) end
   ui.text("carpeta de la app: " .. tostring(FOLDER))
   ui.text("audio: " .. audio.status)
+  ui.text("letras cargadas: " .. preload.ready .. " / " .. #allGlyphs .. " (preguntadas " .. preload.i .. ")")
   ui.text("fps: " .. tostring(safe(function() return math.floor(ac.getSim().fps + 0.5) end)))
   ui.text("lineas de un script: " .. (incoming and "recibiendo" or "ninguna") .. " | ultima hace " .. (incoming and string.format("%.1f s", clock - incomingAt) or "-"))
 end
 
-if _G.__HLH_TEST then _G.__hlh = { PREP = PREP, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
+if _G.__HLH_TEST then _G.__hlh = { codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
                                     KEYS = { KEY_LINES, KEY_LANG, KEY_ALIVE }, cycle = cycle, fullWidth = fullWidth, demoLines = demoLines } end

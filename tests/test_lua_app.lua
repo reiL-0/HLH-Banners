@@ -10,31 +10,39 @@ vec2 = V
 rgbm = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end
 
 local rec, handlers, bcast, cur, depth, plays, dummies = {}, {}, {}, V(0, 0), 0, 0, {}
-local areas, hiddenTexts = {}, 0
 ac = { storage = function(t) return t end, FolderID = { ScriptOrigin = 1 }, getFolder = function() return "/app" end,
        onSharedEvent = function(k, cb) handlers[k] = cb end, broadcastSharedEvent = function(k, d) bcast[#bcast + 1] = { k, d } end }
-local function reset() rec = { rects = {}, texts = {}, images = {}, unclipped = 0, leak = 0 }; dummies = {} end
+local function reset() rec = { rects = {}, texts = {}, images = {}, unclipped = 0, glyphs = {}, unclippedGlyph = 0 }; dummies = {} end
 reset()
 ui = {
   getCursor = function() return cur end, setCursor = function(p) cur = p end,
   drawRectFilled = function(a, b) rec.rects[#rec.rects + 1] = { a, b } end,
   drawRect = function(a, b) rec.rects[#rec.rects + 1] = { a, b } end,
-  pushClipRect = function(a, b) depth = depth + 1; areas[depth] = (b.x - a.x) * (b.y - a.y); return true end, popClipRect = function() areas[depth] = nil; depth = depth - 1 end,
+  pushClipRect = function() depth = depth + 1; return true end, popClipRect = function() depth = depth - 1 end,
   pushDWriteFont = function() return true end, popDWriteFont = function() end,
-  dwriteText = function(t, size, col)
-    rec.texts[#rec.texts + 1] = t
-    if depth == 0 then rec.unclipped = rec.unclipped + 1 end
-    if col and col.a and col.a <= 0.05 then hiddenTexts = hiddenTexts + 1 end   -- (drawn unseen: the prep)
-    if col and col.a and col.a > 0.05 and depth > 0 and areas[depth] and areas[depth] <= 1.01 then rec.leak = rec.leak + 1 end   -- (visible text inside the 1 px prep clip would be a bug)
-  end,
+  dwriteText = function(t) rec.texts[#rec.texts + 1] = t; if depth == 0 then rec.unclipped = rec.unclipped + 1 end end,
   measureDWriteText = function(t, size) return V(#t * size * 0.6, size) end,
-  isImageReady = function() return true end, drawImage = function(src) rec.images[#rec.images + 1] = src end,
+  isImageReady = function() return true end,
+  drawImage = function(src)
+    rec.images[#rec.images + 1] = src
+    local h = src:match("/font/%w+/(%x+)%.png$")
+    if h then rec.glyphs[#rec.glyphs + 1] = tonumber(h, 16); if depth == 0 then rec.unclippedGlyph = rec.unclippedGlyph + 1 end end
+  end,
   dummy = function(p) dummies[#dummies + 1] = p end,
   MediaPlayer = function() return { setVolume = function() end, setCurrentTime = function() end, play = function() plays = plays + 1 end } end,
   button = function() return false end, text = function() end, sameLine = function() end, separator = function() end,
 }
 assert(loadfile(path))()
 local H = _G.__hlh
+local function cpchar(cp) if cp < 128 then return string.char(cp) end return "#" .. cp end
+local function frameText() local t = {} for _, cp in ipairs(rec.glyphs) do t[#t + 1] = cpchar(cp) end return table.concat(t) end   -- the letters drawn this frame (spaces only advance)
+
+-- ---- the letters ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+local cps = H.codepoints("A\xC3\x8D\xC3\x91\xE2\x82\xAC \xD0\x96")   -- A Í Ñ € (space) Ж
+assert(#cps == 6 and cps[1] == 65 and cps[2] == 0xCD and cps[3] == 0xD1 and cps[4] == 0x20AC and cps[5] == 32 and cps[6] == 0x416, "UTF-8 is decoded to code points")
+assert(H.pickSet("t", 20) == "t2" and H.pickSet("t", 40) == "t2" and H.pickSet("t", 41) == "t4" and H.pickSet("s", 12) == "s2" and H.pickSet("s", 36) == "s4", "the sharper set for bigger text")
+local gw, gh = H.quadSize("t2", 20)
+assert(gw == 12 and gh == 26.5 and H.glyphWidth("AMARILLA", 20) == 8 * 0.6 * 20, "exact widths: the face is monospace")
 
 -- ---- what a script may send ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 local good = "id=flag;img=flag-yellow;kind=info;c=1,0.757,0.027;title=AMARILLA;sub=PRECAUCION EN PISTA;ev=12"
@@ -69,13 +77,6 @@ advance(k, 1.5, false, "action", function(x) assert(not (x.scale < 1 and x.w > 0
 assert(k.s == "dead")
 local b = H.newCap(); advance(b, 3, true, "action"); advance(b, 0.2, false, "action"); assert(b.s == "shut"); advance(b, 0.02, true, "action"); assert(b.s == "open", "comes back")
 
--- the prep phase: invisible for PREP seconds (its text is drawn unseen), then it opens as usual
-local pc = H.newCap(H.PREP)
-assert(pc.s == "prep" and pc.fade == 0)
-advance(pc, H.PREP - 0.05, true, "info", function(x) assert(x.fade == 0 and x.w == 0, "nothing is seen during the prep") end)
-advance(pc, 0.1, true, "info"); assert(pc.s == "open" and pc.fade == 1, "then it opens: " .. pc.s)
-assert(H.newCap().s == "open", "without prep it opens at once")
-
 -- ---- the stack ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 local function ln(id, img, ev, kind) return { id = id, img = img, ev = ev, kind = kind or "info" } end
 local st = H.newStack()
@@ -93,7 +94,7 @@ local function frame(dt)
   reset(); cur = V(0, 0); depth = 0
   script.windowBanners(dt)
 end
-local seen, phases = {}, {}
+local seen, phases, allText = {}, {}, ""
 local worstX, worstY = 0, 0
 for _ = 1, 600 do   -- 30 s of the demo at 20 fps
   frame(0.05)
@@ -104,21 +105,21 @@ for _ = 1, 600 do   -- 30 s of the demo at 20 fps
   end
   if rec.rects[1] then assert(rec.rects[1][1].x <= 4, "the first thing drawn starts at the window's corner: " .. rec.rects[1][1].x) end
   assert(depth == 0, "clips are balanced every frame")
-  assert(rec.unclipped == 0, "text is only ever drawn inside a clip")
-  assert(rec.leak == 0, "the prep text is never visible")
-  for _, t in ipairs(rec.texts) do seen[t] = true end
+  assert(rec.unclipped == 0 and rec.unclippedGlyph == 0, "text is only ever drawn inside a clip")
+  allText = allText .. "|" .. frameText()
 end
 assert(worstX <= 1e-6 and worstY <= 1e-6, "nothing outside the window's area: " .. worstX .. ", " .. worstY)
-assert(seen["AMARILLA"] and seen["BANDERA AZUL"] and seen["GANADOR"] and seen["SOFIA RIOS"], "the demo's texts, in Spanish")
+assert(allText:find("AMARILLA", 1, true) and allText:find("BANDERAAZUL", 1, true) and allText:find("GANADOR", 1, true) and allText:find("SOFIARIOS", 1, true), "the demo's texts, as letters, in Spanish")
+assert(allText:find("PRECAUCIONENPISTA", 1, true), "both lines of text")
 assert(plays >= 4, "a radio call per new banner: " .. plays)
-assert(hiddenTexts >= 8, "every new banner drew its text unseen first: " .. hiddenTexts)
 assert(#rec.images >= 0)
 
 -- the language of the settings reaches the demo; sound off = no new calls
 H.store.lang = "en"
 local n0 = plays
-for _ = 1, 600 do frame(0.05); for _, t in ipairs(rec.texts) do seen[t] = true end end
-assert(seen["YELLOW"] and seen["BLUE FLAG"] and seen["WINNER"], "the demo follows the language")
+allText = ""
+for _ = 1, 600 do frame(0.05); allText = allText .. "|" .. frameText() end
+assert(allText:find("YELLOW", 1, true) and allText:find("BLUEFLAG", 1, true) and allText:find("WINNER", 1, true), "the demo follows the language")
 H.store.sound = 0
 local n1 = plays
 for _ = 1, 600 do frame(0.05) end
@@ -132,7 +133,7 @@ local function frames(n, payload)
   for i = 1, n do
     if i % 3 == 1 then handlers["HLH.Banners.lines"](payload) end
     frame(0.05)
-    for _, t in ipairs(rec.texts) do if t == "NEGRA" then saw = true end end
+    if frameText():find("NEGRA", 1, true) then saw = true end
   end
   return saw
 end
@@ -152,17 +153,39 @@ bcast = {}
 for _ = 1, 60 do script.update(0.05) end   -- the window is not drawn any more (hidden or closed): no heartbeat, so the game script draws the banners itself
 for _, m in ipairs(bcast) do assert(m[1] ~= "HLH.Banners.alive", "no heartbeat while the window is not drawn") end
 
--- a game without clip rectangles: the text is drawn only once the panel is fully open, never outside it
+-- a game without clip rectangles: the letters are drawn only whole, growing with the panel, and nothing outside it
 ui.pushClipRect = nil
-for k2 in pairs(handlers) do handlers[k2] = handlers[k2] end
-local H2 = H
-handlers["HLH.Banners.lines"]("id=z;img=flag-red;kind=action;c=1,0,0;title=ROJA;sub=CARRERA DETENIDA;ev=1")
+local Q = "id=z;img=flag-red;kind=action;c=1,0,0;title=QQQQ QQQQ QQQQ QQQQ;sub=QQ QQ;ev=1"   -- (Q appears in no other text of the demo: only this banner's letters are counted)
+local counts = {}
+for i = 1, 40 do
+  handlers["HLH.Banners.lines"](Q)
+  frame(0.02)
+  local n = 0
+  for _, cp in ipairs(rec.glyphs) do if cp == 0x51 then n = n + 1 end end
+  counts[#counts + 1] = n
+end
+assert(counts[3] < counts[25] and counts[25] <= counts[40] and counts[40] == 20, "no clip: whole letters appear one after another as the panel opens: " .. table.concat(counts, ","))
+-- DirectWrite mode (the switch to compare): without a clip, text only once the panel is fully open
+H.store.glyph = 0
 local partial, full = false, false
 for i = 1, 40 do
+  handlers["HLH.Banners.lines"]("id=y;img=flag-black;kind=action;c=0.6,0.6,0.6;title=NEGRA;sub=A BOXES;ev=1")
   frame(0.02)
-  for _, t in ipairs(rec.texts) do if t == "ROJA" then if i * 0.02 < 0.5 then partial = true else full = true end end end
+  for _, t in ipairs(rec.texts) do if t == "NEGRA" then if i * 0.02 < 0.5 then partial = true else full = true end end end
 end
-assert(not partial and full, "no clip: no text while the panel opens, text once it is open")
+assert(not partial and full, "DirectWrite without a clip: no text while the panel opens, text once it is open")
+H.store.glyph = 1
+
+-- a letter we have no picture for is drawn as a question mark, and an accent works
+ui.pushClipRect = function(a, b) depth = depth + 1; areas[depth] = (b.x - a.x) * (b.y - a.y); return true end
+handlers["HLH.Banners.lines"]("id=w;img=flag-yellow;kind=action;c=1,1,0;title=\xD0\x96\xC3\x91;sub=X;ev=1")
+for i = 1, 40 do
+  handlers["HLH.Banners.lines"]("id=w;img=flag-yellow;kind=action;c=1,1,0;title=\xD0\x96\xC3\x91;sub=X;ev=1")
+  frame(0.02)
+end
+local codes = {}
+for _, cp in ipairs(rec.glyphs) do codes[cp] = true end
+assert(codes[0x3F] and codes[0xD1], "an unknown letter becomes '?', an accented one has its picture")
 
 -- the settings window runs and lists what is missing
 local listed = {}
