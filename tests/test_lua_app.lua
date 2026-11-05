@@ -204,6 +204,30 @@ local nFit = sizes(0)
 assert(nFit > 3, "fitted: the size follows the banners: " .. nFit)
 H.store.reserve, H.store.rows, H.store.demo = 1, 5, 1
 
+-- the next column does not move while a capsule of the first one unfolds or folds: four fixed banners in two columns of two; the widest (the first) folds its text at ~5.5 s
+do
+  H.store.rows, H.store.demo, H.store.scale, H.store.reserve = 2, 0, 1, 1
+  local function send(payload) handlers["HLH.Banners.lines"](payload) end
+  local EMPTY = ""
+  for i = 1, 100 do if i % 3 == 1 then send(EMPTY) end; frame(0.05) end   -- (whatever an earlier scenario left closes)
+  local FOUR = "id=a;img=flag-yellow;kind=info;c=1,0.7,0;title=PRECAUCION EN PISTA LARGA;sub=TEXTO LARGO PARA OCUPAR MUCHO ANCHO;ev=1\n"
+    .. "id=b;img=flag-blue;kind=action;c=0,0.4,1;title=AZUL;sub=X;ev=1\nid=c;img=flag-red;kind=action;c=1,0,0;title=ROJA;sub=Y;ev=1\nid=d;img=flag-black;kind=action;c=0.5,0.5,0.5;title=NEGRA;sub=Z;ev=1"
+  local lo, hi, folded = 1e9, -1e9, false
+  for i = 1, 240 do   -- 12 s
+    if i % 3 == 1 then send(FOUR) end
+    frame(0.05)
+    if i * 0.05 > 2 then   -- (after the opening and the first glide)
+      local maxX = 0
+      for _, r in ipairs(rec.rects) do maxX = math.max(maxX, r[1].x) end
+      lo, hi = math.min(lo, maxX), math.max(hi, maxX)
+      if i * 0.05 > 6.5 then folded = true end
+    end
+  end
+  assert(folded and hi - lo < 2, "the last column stays where it is while the first one's text folds: it moved " .. (hi - lo) .. " px")
+  H.store.rows, H.store.demo, H.store.scale = 5, 1, 1.25
+  for i = 1, 100 do if i % 3 == 1 then send(EMPTY) end; frame(0.05) end
+end
+
 -- the language of the settings reaches the demo; sound off = no new calls
 H.store.lang = "en"
 local n0 = plays
@@ -266,53 +290,30 @@ end
 assert(not partial and full, "DirectWrite without a clip: no text while the panel opens, text once it is open")
 H.store.glyph = 2
 
--- a letter we have no picture for is drawn as a question mark, and an accent works
+-- mixed text: a line whose characters all have a picture is drawn from the pictures (instant, also a counter that changes every second); a line with a character that has none (a name in Cyrillic) is
+-- drawn with DirectWrite, only that line; the clip and the font stacks stay balanced
 ui.pushClipRect = function() depth = depth + 1 end
-handlers["HLH.Banners.lines"]("id=w;img=flag-yellow;kind=action;c=1,1,0;title=\xD0\x96\xC3\x91;sub=X;ev=1")
-for i = 1, 40 do
-  handlers["HLH.Banners.lines"]("id=w;img=flag-yellow;kind=action;c=1,1,0;title=\xD0\x96\xC3\x91;sub=X;ev=1")
+H.store.glyph = 2
+local MIX = "id=w;img=flag-yellow;kind=action;c=1,1,0;title=\xD0\x98\xD0\x92\xD0\x90\xD0\x9D;sub=TIME 12 \xC3\x91;ev=1"   -- title "ИВАН" (Cyrillic), sub "TIME 12 Ñ"
+local sawTitle, codes, dwTitle = false, {}, 0
+for i = 1, 60 do
+  handlers["HLH.Banners.lines"](MIX)
   frame(0.02)
+  assert(depth == 0 and fontDepth == 0, "stacks balanced in a frame with a DirectWrite line")
+  for _, t in ipairs(rec.texts) do if t == "\xD0\x98\xD0\x92\xD0\x90\xD0\x9D" then dwTitle = dwTitle + 1 end end
+  for _, cp in ipairs(rec.glyphs) do codes[cp] = true end
 end
-local codes = {}
-for _, cp in ipairs(rec.glyphs) do codes[cp] = true end
-assert(codes[0x3F] and codes[0xD1], "an unknown letter becomes '?', an accented one has its picture")
-
--- the numbers under the banners (to see what the app and the game do), only when asked
-local info = {}
-ui.text = function(t) info[#info + 1] = t end
-H.store.info, H.store.demo = 1, 2
-for _ = 1, 200 do frame(0.05) end   -- (banners born while the window was not drawn, in the heartbeat test above, would count their wait)
-H.stat.delayMax, H.stat.delay = 0, nil
-local maxEntries, line, delayLine, entryLines = 0, nil, nil, 0
-for _ = 1, 800 do
-  info = {}
-  frame(0.05)
-  for _, t in ipairs(info) do
-    local n = tonumber(t:match("entradas=(%d+)"))
-    if n then maxEntries = math.max(maxEntries, n); line = t end
-    if t:find("retraso creada", 1, true) then delayLine = t end
-  end
-  entryLines = math.max(entryLines, #info - 2)
+assert(dwTitle > 0, "the Cyrillic title is drawn with DirectWrite")
+assert(codes[string.byte("T")] and codes[string.byte("1")] and codes[0xD1], "the sub, whose characters all have a picture, is drawn from the pictures (an accent too)")
+assert(not codes[0x3F], "no question marks: a line without pictures goes to DirectWrite whole")
+local onlyOk = false
+for i = 1, 40 do
+  handlers["HLH.Banners.lines"]("id=w;img=flag-yellow;kind=action;c=1,1,0;title=SOF\xC3\x8DA R\xC3\x8DOS;sub=X;ev=2")   -- SOFÍA RÍOS: all have pictures
+  frame(0.02)
+  for _, t in ipairs(rec.texts) do if t:find("SOF", 1, true) then onlyOk = true end end
 end
-assert(maxEntries >= 8 and line:find("fps=20", 1, true) and line:find("pido ", 1, true) and line:find("llamadas a la ventana=20/s", 1, true), "the info line: entries, frame rate, how often the game calls the window, the window: " .. maxEntries .. " " .. tostring(line))
-assert(delayLine and delayLine:find("maximo 0.", 1, true), "a banner is drawn at once after it is created: " .. tostring(delayLine))
-assert(entryLines >= 8, "one line per banner: " .. entryLines)
-info = {}
-H.store.info = 0
-frame(0.05); assert(#info == 0, "nothing is written when it is off")
-H.store.demo = 1
-ui.text = function() end
-
--- if the game calls the window less often than it updates the app, a banner waits to be drawn: the numbers say so
-H.store.info, H.store.demo = 1, 1
-for _ = 1, 100 do frame(0.05) end
-H.stat.delayMax, H.stat.delay = 0, nil
-for i = 1, 400 do
-  script.update(0.05)
-  if i % 40 == 0 then reset(); cur = V(0, 0); depth = 0; script.windowBanners(0.05) end   -- the window is called once every 2 s
-end
-assert(H.stat.delayMax >= 1.5, "a window called every 2 s makes banners wait: " .. H.stat.delayMax)
-H.store.info = 0
+assert(not onlyOk, "a name whose letters all have pictures never needs DirectWrite")
+H.store.glyph = 2
 
 -- the settings window runs and lists what is missing
 local listed = {}

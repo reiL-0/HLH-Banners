@@ -123,7 +123,7 @@ local incoming, incomingAt = nil, -1e9   -- the lines a game script sent, and wh
 local drawnAt, aliveAt, langAt, lastLang = -1e9, 0, 0, nil
 local calls = { pending = {}, nextAt = 0, seen = {} }   -- the radio calls to play, one after another
 local audio = { status = "not tried", player = nil }
-local stat = { frames = 0, time = 0, fps = 0, worst = 0, worstNow = 0, created = 0, imgs = 0, imgsLast = 0, winCalls = 0, winRate = 0, delay = nil, delayMax = 0 }   -- measured by the app itself, from the time the game gives it each frame
+local stat = { dwLines = 0, dwLast = 0, frames = 0, time = 0, fps = 0, worst = 0, worstNow = 0, created = 0, imgs = 0, imgsLast = 0, winCalls = 0, winRate = 0, delay = nil, delayMax = 0 }   -- measured by the app itself, from the time the game gives it each frame
 local seenWin = { need = nil, got = nil, drawn = 0, maxDrawn = 0 }   -- what the banners window asked for and what the game gave it (diagnostics)
 
 local DEMO = {
@@ -138,8 +138,8 @@ local MANY = {   -- id, icon, kind, colour, text key, from s, until s
   { "pits", "pits-closed", "info", { 0.937, 0.325, 0.314 }, "pits", 3, 34 },
   { "white", "flag-white", "info", { 0.96, 0.96, 0.96 }, "white", 4.5, 35 },
   { "bw", "flag-bw", "info", { 0.741, 0.741, 0.741 }, "bw", 6, 36 },
-  { "n-blue", "flag-blue", "action", { 0.161, 0.475, 1 }, "blue", 8, 30 },
-  { "owed", "give-back", "action", { 1, 0.439, 0.263 }, "owed", 10, 31 },
+  { "n-blue", "flag-blue", "action", { 0.161, 0.475, 1 }, "blue", 8, 31 },
+  { "owed", "give-back", "action", { 1, 0.439, 0.263 }, "owed", 10, 29 },   -- (a give-back has its countdown: it ends before the flag)
   { "winner", "winner", "sticky", { 1, 0.835, 0.31 }, "winner", 12, 37 },
 }
 local MANY_TEXT = {
@@ -271,6 +271,17 @@ local function atlasCodeAt(set, ux, uy)   -- the inverse, for the tests: which l
   return codeList[row * ATLAS_COLS + col + 1]
 end
 
+local canCache, canCount = {}, 0
+local function canGlyph(text)   -- every character of the text has a picture (a space only advances)
+  local r = canCache[text]
+  if r ~= nil then return r end
+  r = true
+  for _, cp in ipairs(codepointsCached(text)) do if cp ~= 32 and not KNOWN[cp] then r = false break end end
+  if canCount > 400 then canCache, canCount = {}, 0 end
+  canCache[text], canCount = r, canCount + 1
+  return r
+end
+
 local function glyphWidth(text, size) return #codepointsCached(text) * ADV * size end
 -- The letters sit on a common baseline 1.02 em below the top of their picture, capitals 0.73 em tall (measured on the pictures); to put the TOP of the capitals at `capTop` px the picture goes
 -- up by the 0.29 em above them. The capitals of the title start 10 px under the capsule's top, the subtitle's 33 px (as DirectWrite drew them).
@@ -363,18 +374,27 @@ local PAD, BADGE, CAPH, GAP, RAD = 6, 44, 56, 10, 14
 local TITLE, SUB = 18, 11   -- the sizes DirectWrite used: the face is monospace (0.6 em), so a text is exactly as wide in letters as it was in DirectWrite
 local function haveClip() return type(ui.pushClipRect) == "function" and type(ui.popClipRect) == "function" end
 local function textWidth(text, size)
-  if useGlyphs() then return glyphWidth(text, size) end   -- exact: the face is monospace
-  local w = safe(function() return ui.measureDWriteText(text, size).x end)
+  if useGlyphs() and canGlyph(text) then return glyphWidth(text, size) end   -- exact: the face is monospace
+  local w = safe(function() return ui.measureDWriteText(text, size).x end)   -- (a text with a character that has no picture: DirectWrite, measured)
   return w or (#text * size * 0.62)
 end
 local function iconPath(img) return FOLDER and (FOLDER .. "/icons/ico-" .. img .. ".png") or nil end
 
 local function fullWidth(l, k) return (PAD * 2 + BADGE + GAP) * k + math.max(textWidth(l.title, TITLE * k), textWidth(l.sub, SUB * k)) + 10 * k + 4 end
 
-local function capWidth(e, k)   -- the width of a capsule as it is drawn right now (an icon alone is narrow, one with its text out is wide)
-  local c, l = e.cap, e.line
-  local tw = (math.max(textWidth(l.title, TITLE * k), textWidth(l.sub, SUB * k)) + 10 * k) * c.w
-  return ((PAD * 2 + BADGE) * k + (tw > 1 and (GAP * k + tw) or 0)) * c.scale + 4
+-- One line of text. Letters from the pictures (instant, also for a counter that changes every second) when every character has one; DirectWrite, which handles any alphabet but is built by the game the
+-- first time it sees a text, only for the lines that need it (a name in Cyrillic) or when asked ("Texto: DirectWrite").
+local function drawLine(x, yGlyph, yDw, text, kind, size, rgba, reveal, clipped, wholePanel)
+  if text == "" then return end
+  if useGlyphs() and canGlyph(text) then
+    drawGlyphText(x, yGlyph, text, kind, size, rgba, reveal, clipped)
+  elseif clipped or wholePanel then   -- (DirectWrite cannot be revealed letter by letter: without a clip it is drawn only once the panel is fully open)
+    local pushed = FONT and (pcall(ui.pushDWriteFont, FONT))
+    ui.setCursor(vec2(x, yDw))
+    safe(ui.dwriteText, text, size, rgba)
+    if pushed then pcall(ui.popDWriteFont) end
+    stat.dwLines = stat.dwLines + 1
+  end
 end
 
 local function drawCapsule(e, k, x0)   -- at x0, the top-left of its place in the window (its column and row)
@@ -402,21 +422,14 @@ local function drawCapsule(e, k, x0)   -- at x0, the top-left of its place in th
     -- (whether it worked is the first result of pcall: the game's push calls return nothing, so their own result says nothing; taking it as "pushed" left a clip rectangle open on every frame
     -- and every banner below a banner with text was cut away)
     local clipped = haveClip() and (pcall(ui.pushClipRect, t1, t2, true))
-    if useGlyphs() then
-      drawGlyphText(t1.x, p1.y + glyphY(10, TITLE) * k, l.title, "t", TITLE * k, rgbm(1, 1, 1, fade), tw - 4 * k, clipped)
-      drawGlyphText(t1.x, p1.y + glyphY(33, SUB) * k, l.sub, "s", SUB * k, rgbm(0.68, 0.71, 0.76, fade), tw - 4 * k, clipped)
-    elseif clipped or c.w >= 0.999 then
-      local pushed = FONT and (pcall(ui.pushDWriteFont, FONT))
-      ui.setCursor(t1 + vec2(0, 5 * k))
-      safe(ui.dwriteText, l.title, TITLE * k, rgbm(1, 1, 1, fade))
-      ui.setCursor(t1 + vec2(0, 30 * k))
-      if l.sub ~= "" then safe(ui.dwriteText, l.sub, SUB * k, rgbm(0.68, 0.71, 0.76, fade)) end
-      if pushed then pcall(ui.popDWriteFont) end
-    end
+    local whole = c.w >= 0.999
+    drawLine(t1.x, p1.y + glyphY(10, TITLE) * k, p1.y + 5 * k, l.title, "t", TITLE * k, rgbm(1, 1, 1, fade), tw - 4 * k, clipped, whole)
+    drawLine(t1.x, p1.y + glyphY(33, SUB) * k, p1.y + 30 * k, l.sub, "s", SUB * k, rgbm(0.68, 0.71, 0.76, fade), tw - 4 * k, clipped, whole)
     if clipped then ui.popClipRect() end
   end
 end
 
+local colPos = {}   -- where each column is drawn: it glides to where the column belongs (so a column that appears or changes does not jump)
 function script.windowBanners(dt)
   drawnAt = clock
   stat.winCalls = stat.winCalls + 1
@@ -424,15 +437,22 @@ function script.windowBanners(dt)
   local x0 = ui.getCursor()
   local rows = math.max(1, store.rows or 5)
   local slot = (CAPH + 8) * k
-  local colX, width = 0, 0
-  for first = 1, math.max(1, #entries), rows do   -- a column at a time, top to bottom; the next one starts to its right (the banners that do not fit under the others)
-    local colW = 0
-    for i = first, math.min(first + rows - 1, #entries) do colW = math.max(colW, capWidth(entries[i], k)) end
-    for i = first, math.min(first + rows - 1, #entries) do drawCapsule(entries[i], k, x0 + vec2(colX, (i - first) * slot)) end
-    colX = colX + colW + (colW > 0 and 10 * k or 0)
-    width = colX
+  -- A column is as wide as its widest capsule WITH ITS TEXT OUT (not as it is drawn this frame): the next column does not move while a capsule of the first one unfolds or folds. When the banners of a
+  -- column really change, the next column glides to its new place.
+  local ci, acc = 0, 0
+  for first = 1, math.max(1, #entries), rows do
+    ci = ci + 1
+    local last = math.min(first + rows - 1, #entries)
+    local fullW = 0
+    for i = first, last do fullW = math.max(fullW, fullWidth(entries[i].line, k)) end
+    local p = colPos[ci] or acc
+    p = p + (acc - p) * math.min(1, (dt or 0.016) * 12)
+    colPos[ci] = p
+    for i = first, last do drawCapsule(entries[i], k, x0 + vec2(p, (i - first) * slot)) end
+    acc = acc + fullW + (fullW > 0 and 10 * k or 0)
   end
-  width = math.max(width, 330 * k * (#entries == 0 and 1 or 0), 60 * k)
+  for j = ci + 1, #colPos do colPos[j] = nil end
+  local width = math.max(acc, 60 * k, 330 * k * (#entries == 0 and 1 or 0))
   local needH = math.min(math.max(1, #entries), rows) * slot
   if store.reserve == 1 then
     -- A banner drawn outside the window's rectangle is cut by the game until the window has grown, so a new banner could open (0.55 s) unseen and appear all at once: the window has the room of the
@@ -445,9 +465,10 @@ function script.windowBanners(dt)
   ui.setCursor(x0 + vec2(0, needH))
   ui.dummy(vec2(width, 2))
   stat.imgsLast, stat.imgs = stat.imgs, 0
+  stat.dwLast, stat.dwLines = stat.dwLines, 0
   if store.info == 1 then   -- numbers under the banners: what the app has, what it draws, how fast the game runs it, what window it asked for and got
     local ws0 = safe(ui.windowSize)
-    ui.text(string.format("entradas=%d  fps=%.0f (peor %.0f ms)  llamadas a la ventana=%.0f/s  letras/fotograma=%d  pido %dx%d  tengo %s", #entries, stat.fps, stat.worst * 1000, stat.winRate, stat.imgsLast, width, needH, ws0 and string.format("%dx%d", ws0.x, ws0.y) or "?"))
+    ui.text(string.format("entradas=%d  fps=%.0f (peor %.0f ms)  llamadas a la ventana=%.0f/s  letras/fotograma=%d  lineas DirectWrite=%d  pido %dx%d  tengo %s", #entries, stat.fps, stat.worst * 1000, stat.winRate, stat.imgsLast, stat.dwLast, width, needH, ws0 and string.format("%dx%d", ws0.x, ws0.y) or "?"))
     ui.text(string.format("retraso creada->dibujada: ultimo %.2f s, maximo %.2f s", stat.delay or 0, stat.delayMax))
     for i, e in ipairs(entries) do   -- one line per banner: where the app puts it and in which state
       local c = e.cap
@@ -457,7 +478,7 @@ function script.windowBanners(dt)
   seenWin.need, seenWin.drawn = { width, needH }, #entries   -- (and what the game really gave the window: it can be less than it asked for)
   seenWin.maxDrawn = math.max(seenWin.maxDrawn, #entries)
   local ws = safe(ui.windowSize)
-  if ws then seenWin.got = { ws.x, ws.y } end   -- (the window fits its content: the room of the columns of banners that are on screen)
+  if ws then seenWin.got = { ws.x, ws.y } end
 end
 
 -- ---- the settings window ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
