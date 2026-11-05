@@ -16,16 +16,20 @@ local function clamp(x, lo, hi) if x < lo then return lo elseif x > hi then retu
 -- ---- the capsule's animation: a state machine advanced by the time between frames (the same as the hub's and the tested Python one) ---------------------------------------------------
 -- open (the icon pops 0.4 -> 1.05 -> 1 while the text unfolds to the right) -> text -> [fold: an "info" banner's text folds after 5 s] -> icon -> close (the badge shrinks to 0.2 and fades).
 -- A banner removed while its text is out folds the text FIRST (shut), so no text is ever left on its own and the icon only shrinks when the text is gone.
-local CAP_T, TEXT_SEC = { open = 0.55, shut = 0.4, close = 0.32 }, 5
+local CAP_T, TEXT_SEC, PREP = { open = 0.55, shut = 0.4, close = 0.32 }, 5, 0.15
 local function easeOut(t) t = clamp(t, 0, 1) return 1 - (1 - t) ^ 3 end
 local function easeIn(t) t = clamp(t, 0, 1) return t * t end
 local function popScale(t) if t < 0.6 then return 0.4 + 0.65 * easeOut(t / 0.6) end return 1.05 - 0.05 * easeOut((t - 0.6) / 0.4) end
-local function newCap() return { s = "open", t = 0, age = 0, w = 0, pop = 0.4, scale = 1, fade = 1 } end
+-- prep: (optional) the game builds a text the first time it sees it, so a new banner first draws its text unseen for PREP seconds, then opens: the text is ready when the unfolding starts.
+local function newCap(prep) return { s = (prep or 0) > 0 and "prep" or "open", prep = prep or 0, t = 0, age = 0, w = 0, pop = 0.4, scale = 1, fade = (prep or 0) > 0 and 0 or 1 } end
 local function capStep(c, dt, want, kind)   -- false once the capsule is gone
   c.t = c.t + dt
   if want and (c.s == "shut" or c.s == "close") then c.s, c.t, c.scale, c.fade = "open", 0, 1, 1 end
   local s = c.s
-  if s == "open" then
+  if s == "prep" then
+    c.w, c.pop, c.fade = 0, 0.4, 0
+    if c.t >= c.prep then c.s, c.t, c.fade = "open", 0, 1 end
+  elseif s == "open" then
     local p = c.t / CAP_T.open
     c.w, c.pop, c.scale, c.fade = easeOut(p), popScale(p), 1, 1
     if p >= 1 then c.s, c.t, c.age, c.w, c.pop = "text", 0, 0, 1, 1 end
@@ -51,7 +55,7 @@ end
 
 -- ---- the stack: the capsules on screen. A line that is gone keeps its entry while it closes; two lines with the same id (two cuts seconds apart): the newest wins ---------------------------
 local function newStack() return { caps = {}, order = {} } end
-local function stackUpdate(st, lines, dt)
+local function stackUpdate(st, lines, dt, prep)
   local want, ids = {}, {}
   for _, l in ipairs(lines) do
     if not want[l.id] then ids[#ids + 1] = l.id end
@@ -60,11 +64,11 @@ local function stackUpdate(st, lines, dt)
   for _, id in ipairs(ids) do
     local l = want[id]
     local e = st.caps[id]
-    if not e then e = { id = id, cap = newCap() }; st.caps[id] = e; st.order[#st.order + 1] = id end
+    if not e then e = { id = id, cap = newCap(prep) }; st.caps[id] = e; st.order[#st.order + 1] = id end
     if e.img ~= l.img or (l.ev and l.ev ~= e.ev) then   -- another banner in the same place, or a new event of it: it opens again
       local fresh = e.img ~= nil
       e.img, e.ev = l.img, l.ev
-      if fresh and (e.cap.s == "text" or e.cap.s == "icon" or e.cap.s == "fold") then e.cap = newCap(); e.isNew = true end
+      if fresh and (e.cap.s == "text" or e.cap.s == "icon" or e.cap.s == "fold") then e.cap = newCap(prep); e.isNew = true end
       if not fresh then e.isNew = true end
     end
     e.line = l
@@ -104,11 +108,12 @@ end
 
 -- ---- settings (kept by the game between sessions) ----------------------------------------------------------------------------------------------------------------------------------------
 local SCALES, VOLUMES, LANGS = { 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0 }, { 100, 70, 40, 0 }, { "auto", "es", "en" }
-local store = safe(ac.storage, { lang = "auto", scale = 1.25, sound = 100, demo = 1 }) or { lang = "auto", scale = 1.25, sound = 100, demo = 1 }
+local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, prep = 1, font = 1 }   -- prep: draw a new text unseen before the banner opens; font: 1 = the app's own typeface, 0 = the game's
+local store = safe(ac.storage, DEFAULTS) or DEFAULTS
 local function cycle(list, cur) for i, v in ipairs(list) do if v == cur then return list[i % #list + 1] end end return list[1] end
 
 local FOLDER = safe(function() return ac.getFolder(ac.FolderID.ScriptOrigin) end)   -- the app's own folder (icons, typeface, radio sound)
-local FONT = FOLDER and ("JetBrains Mono:" .. FOLDER .. "/fonts/JetBrainsMono-ExtraBold.ttf") or nil
+local FONT_OWN = FOLDER and ("JetBrains Mono:" .. FOLDER .. "/fonts/JetBrainsMono-ExtraBold.ttf") or nil
 
 -- ---- state ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 local clock, demoT = 0, 0
@@ -181,7 +186,7 @@ function script.update(dt)
   else lines = {} end
   queueCalls(lines)
   if #calls.pending > 0 and clock >= calls.nextAt then table.remove(calls.pending, 1); calls.nextAt = clock + 0.4; playRadio() end
-  entries = stackUpdate(stack, lines, dt)
+  entries = stackUpdate(stack, lines, dt, store.prep == 1 and PREP or 0)
   if clock - aliveAt >= 0.25 then   -- the script keeps drawing the banners itself unless this beats: the window can be hidden or closed
     aliveAt = clock
     if clock - drawnAt < 0.5 then broadcast(KEY_ALIVE, string.format("%.2f", clock)) end
@@ -205,6 +210,19 @@ local function drawCapsule(e, k)   -- at the cursor; moves the cursor down
   local c, l = e.cap, e.line
   local col = l.c
   local x0 = ui.getCursor()
+  if c.s == "prep" then   -- nothing is seen yet: the text is drawn once inside a 1 px clip at almost no opacity, so the game builds it now and not while the banner unfolds
+    if haveClip() and safe(ui.pushClipRect, x0, x0 + vec2(1, 1), true) then
+      local pushed = store.font == 1 and FONT_OWN and safe(ui.pushDWriteFont, FONT_OWN)
+      ui.setCursor(x0)
+      safe(ui.dwriteText, l.title, TITLE * k, rgbm(1, 1, 1, 0.02))
+      ui.setCursor(x0)
+      if l.sub ~= "" then safe(ui.dwriteText, l.sub, SUB * k, rgbm(1, 1, 1, 0.02)) end
+      if pushed then safe(ui.popDWriteFont) end
+      ui.popClipRect()
+    end
+    ui.setCursor(x0 + vec2(0, (CAPH + 8) * k))
+    return
+  end
   local textW = math.max(textWidth(l.title, TITLE * k), textWidth(l.sub, SUB * k)) + 10 * k
   local tw = textW * c.w
   local sc, fade = c.scale, c.fade
@@ -225,7 +243,7 @@ local function drawCapsule(e, k)   -- at the cursor; moves the cursor down
     local t2 = vec2(p2.x - 4, p2.y)
     local clipped = haveClip() and safe(ui.pushClipRect, t1, t2, true)
     if clipped or c.w >= 0.999 then
-      local pushed = FONT and safe(ui.pushDWriteFont, FONT)
+      local pushed = store.font == 1 and FONT_OWN and safe(ui.pushDWriteFont, FONT_OWN)
       ui.setCursor(t1 + vec2(0, 5 * k))
       safe(ui.dwriteText, l.title, TITLE * k, rgbm(1, 1, 1, fade))
       ui.setCursor(t1 + vec2(0, 30 * k))
@@ -270,13 +288,17 @@ function script.windowSettings(dt)
   if ui.button("Sonido: " .. (store.sound == 0 and "off" or (store.sound .. "%"))) then store.sound = cycle(VOLUMES, store.sound) end
   ui.sameLine()
   if ui.button("Probar audio") then playRadio() end
+  if ui.button("Precalentar texto: " .. (store.prep == 1 and "on" or "off")) then store.prep = 1 - store.prep end
+  ui.sameLine()
+  if ui.button("Fuente: " .. (store.font == 1 and "JetBrains (propia)" or "del juego")) then store.font = 1 - store.font end
   ui.separator()
   ui.text("Diagnostico (que ofrece el juego):")
   for _, name in ipairs(WANT) do ui.text("  " .. name .. ": " .. (has(name) and "si" or "NO")) end
   ui.text("carpeta de la app: " .. tostring(FOLDER))
   ui.text("audio: " .. audio.status)
+  ui.text("fps: " .. tostring(safe(function() return math.floor(ac.getSim().fps + 0.5) end)))
   ui.text("lineas de un script: " .. (incoming and "recibiendo" or "ninguna") .. " | ultima hace " .. (incoming and string.format("%.1f s", clock - incomingAt) or "-"))
 end
 
-if _G.__HLH_TEST then _G.__hlh = { capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
+if _G.__HLH_TEST then _G.__hlh = { PREP = PREP, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
                                     KEYS = { KEY_LINES, KEY_LANG, KEY_ALIVE }, cycle = cycle, fullWidth = fullWidth, demoLines = demoLines } end

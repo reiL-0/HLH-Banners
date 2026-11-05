@@ -10,17 +10,23 @@ vec2 = V
 rgbm = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end
 
 local rec, handlers, bcast, cur, depth, plays, dummies = {}, {}, {}, V(0, 0), 0, 0, {}
+local areas, hiddenTexts = {}, 0
 ac = { storage = function(t) return t end, FolderID = { ScriptOrigin = 1 }, getFolder = function() return "/app" end,
        onSharedEvent = function(k, cb) handlers[k] = cb end, broadcastSharedEvent = function(k, d) bcast[#bcast + 1] = { k, d } end }
-local function reset() rec = { rects = {}, texts = {}, images = {}, unclipped = 0 }; dummies = {} end
+local function reset() rec = { rects = {}, texts = {}, images = {}, unclipped = 0, leak = 0 }; dummies = {} end
 reset()
 ui = {
   getCursor = function() return cur end, setCursor = function(p) cur = p end,
   drawRectFilled = function(a, b) rec.rects[#rec.rects + 1] = { a, b } end,
   drawRect = function(a, b) rec.rects[#rec.rects + 1] = { a, b } end,
-  pushClipRect = function() depth = depth + 1; return true end, popClipRect = function() depth = depth - 1 end,
+  pushClipRect = function(a, b) depth = depth + 1; areas[depth] = (b.x - a.x) * (b.y - a.y); return true end, popClipRect = function() areas[depth] = nil; depth = depth - 1 end,
   pushDWriteFont = function() return true end, popDWriteFont = function() end,
-  dwriteText = function(t) rec.texts[#rec.texts + 1] = t; if depth == 0 then rec.unclipped = rec.unclipped + 1 end end,
+  dwriteText = function(t, size, col)
+    rec.texts[#rec.texts + 1] = t
+    if depth == 0 then rec.unclipped = rec.unclipped + 1 end
+    if col and col.a and col.a <= 0.05 then hiddenTexts = hiddenTexts + 1 end   -- (drawn unseen: the prep)
+    if col and col.a and col.a > 0.05 and depth > 0 and areas[depth] and areas[depth] <= 1.01 then rec.leak = rec.leak + 1 end   -- (visible text inside the 1 px prep clip would be a bug)
+  end,
   measureDWriteText = function(t, size) return V(#t * size * 0.6, size) end,
   isImageReady = function() return true end, drawImage = function(src) rec.images[#rec.images + 1] = src end,
   dummy = function(p) dummies[#dummies + 1] = p end,
@@ -63,6 +69,13 @@ advance(k, 1.5, false, "action", function(x) assert(not (x.scale < 1 and x.w > 0
 assert(k.s == "dead")
 local b = H.newCap(); advance(b, 3, true, "action"); advance(b, 0.2, false, "action"); assert(b.s == "shut"); advance(b, 0.02, true, "action"); assert(b.s == "open", "comes back")
 
+-- the prep phase: invisible for PREP seconds (its text is drawn unseen), then it opens as usual
+local pc = H.newCap(H.PREP)
+assert(pc.s == "prep" and pc.fade == 0)
+advance(pc, H.PREP - 0.05, true, "info", function(x) assert(x.fade == 0 and x.w == 0, "nothing is seen during the prep") end)
+advance(pc, 0.1, true, "info"); assert(pc.s == "open" and pc.fade == 1, "then it opens: " .. pc.s)
+assert(H.newCap().s == "open", "without prep it opens at once")
+
 -- ---- the stack ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 local function ln(id, img, ev, kind) return { id = id, img = img, ev = ev, kind = kind or "info" } end
 local st = H.newStack()
@@ -92,11 +105,13 @@ for _ = 1, 600 do   -- 30 s of the demo at 20 fps
   if rec.rects[1] then assert(rec.rects[1][1].x <= 4, "the first thing drawn starts at the window's corner: " .. rec.rects[1][1].x) end
   assert(depth == 0, "clips are balanced every frame")
   assert(rec.unclipped == 0, "text is only ever drawn inside a clip")
+  assert(rec.leak == 0, "the prep text is never visible")
   for _, t in ipairs(rec.texts) do seen[t] = true end
 end
 assert(worstX <= 1e-6 and worstY <= 1e-6, "nothing outside the window's area: " .. worstX .. ", " .. worstY)
 assert(seen["AMARILLA"] and seen["BANDERA AZUL"] and seen["GANADOR"] and seen["SOFIA RIOS"], "the demo's texts, in Spanish")
 assert(plays >= 4, "a radio call per new banner: " .. plays)
+assert(hiddenTexts >= 8, "every new banner drew its text unseen first: " .. hiddenTexts)
 assert(#rec.images >= 0)
 
 -- the language of the settings reaches the demo; sound off = no new calls

@@ -21,6 +21,7 @@ In the game (a practice session alone is enough) enable **HLH Banners** (it open
 | Settings window: **Tamano** | 75 % ... 300 %: is it sharp and does the window follow the size? | Yes |
 | Settings window: **Idioma** | The demo text changes language straight away? Kept after restarting AC? | Yes |
 | Settings window: **Sonido / Probar audio** | A short burst and a beep, one per new banner, one after another? (`audio:` in the diagnostics says what happened) | Yes, loud enough |
+| Settings window: **Precalentar texto** and **Fuente** | The text used to appear late and not follow the unfolding. With **Precalentar texto: on** (default) a new banner first draws its text unseen for 0.15 s and then opens. Compare on/off with the demo: is the text there from the first frame of the unfolding? Is it late **only the first time each text shows** (the demo repeats every 26 s) or **every time**? Then try **Fuente: del juego**: faster? Look at `fps:` in the diagnostics too. | Text follows the unfolding from the first frame |
 | Settings window: **Diagnostico** | Which functions say **NO**? (`ui.pushClipRect`, `ui.drawRect`, `ui.measureDWriteText`, `ui.MediaPlayer`, `ac.onSharedEvent`...) | All **si** |
 | Probe window | `heartbeat from the app: ... s ago` and `sent: N`. With the probe running, its yellow flag replaces the demo, in the language you picked in the settings | Heartbeat arrives; the language follows |
 
