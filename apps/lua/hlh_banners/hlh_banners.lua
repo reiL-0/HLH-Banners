@@ -399,17 +399,19 @@ local function drawCapsule(e, k, x0)   -- at x0, the top-left of its place in th
   if tw > 1 and sc == 1 then   -- the text, inside its own clip: nothing is ever drawn outside the panel (without a clip it is drawn only once the panel is fully open)
     local t1 = p1 + vec2((PAD + BADGE + GAP) * k, 0)
     local t2 = vec2(p2.x - 4, p2.y)
-    local clipped = haveClip() and safe(ui.pushClipRect, t1, t2, true)
+    -- (whether it worked is the first result of pcall: the game's push calls return nothing, so their own result says nothing; taking it as "pushed" left a clip rectangle open on every frame
+    -- and every banner below a banner with text was cut away)
+    local clipped = haveClip() and (pcall(ui.pushClipRect, t1, t2, true))
     if useGlyphs() then
       drawGlyphText(t1.x, p1.y + glyphY(10, TITLE) * k, l.title, "t", TITLE * k, rgbm(1, 1, 1, fade), tw - 4 * k, clipped)
       drawGlyphText(t1.x, p1.y + glyphY(33, SUB) * k, l.sub, "s", SUB * k, rgbm(0.68, 0.71, 0.76, fade), tw - 4 * k, clipped)
     elseif clipped or c.w >= 0.999 then
-      local pushed = FONT and safe(ui.pushDWriteFont, FONT)
+      local pushed = FONT and (pcall(ui.pushDWriteFont, FONT))
       ui.setCursor(t1 + vec2(0, 5 * k))
       safe(ui.dwriteText, l.title, TITLE * k, rgbm(1, 1, 1, fade))
       ui.setCursor(t1 + vec2(0, 30 * k))
       if l.sub ~= "" then safe(ui.dwriteText, l.sub, SUB * k, rgbm(0.68, 0.71, 0.76, fade)) end
-      if pushed then safe(ui.popDWriteFont) end
+      if pushed then pcall(ui.popDWriteFont) end
     end
     if clipped then ui.popClipRect() end
   end

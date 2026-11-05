@@ -10,7 +10,7 @@ vec2 = V
 rgbm = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end
 
 local H   -- (the app's exports, filled in once it is loaded; the stand-ins below use it)
-local rec, handlers, bcast, cur, depth, plays, dummies = {}, {}, {}, V(0, 0), 0, 0, {}
+local rec, handlers, bcast, cur, depth, plays, dummies, fontDepth = {}, {}, {}, V(0, 0), 0, 0, {}, 0
 ac = { storage = function(t) return t end, FolderID = { ScriptOrigin = 1 }, getFolder = function() return "/app" end,
        onSharedEvent = function(k, cb) handlers[k] = cb end, broadcastSharedEvent = function(k, d) bcast[#bcast + 1] = { k, d } end }
 local function reset() rec = { rects = {}, texts = {}, images = {}, unclipped = 0, glyphs = {}, unclippedGlyph = 0, sources = {}, nsources = 0 }; dummies = {} end
@@ -19,8 +19,10 @@ ui = {
   getCursor = function() return cur end, setCursor = function(p) cur = p end,
   drawRectFilled = function(a, b) rec.rects[#rec.rects + 1] = { a, b } end,
   drawRect = function(a, b) rec.rects[#rec.rects + 1] = { a, b } end,
-  pushClipRect = function() depth = depth + 1; return true end, popClipRect = function() depth = depth - 1 end,
-  pushDWriteFont = function() return true end, popDWriteFont = function() end,
+  -- like the game's: the push calls return NOTHING. The first version of the app took their return value as "it was pushed" and never popped: the clip rectangles piled up and every banner under a
+  -- banner with text was cut away (a video of the game showed each new banner appearing only when an earlier one folded its text).
+  pushClipRect = function() depth = depth + 1 end, popClipRect = function() depth = depth - 1 end,
+  pushDWriteFont = function() fontDepth = fontDepth + 1 end, popDWriteFont = function() fontDepth = fontDepth - 1 end,
   dwriteText = function(t) rec.texts[#rec.texts + 1] = t; if depth == 0 then rec.unclipped = rec.unclipped + 1 end end,
   measureDWriteText = function(t, size) return V(#t * size * 0.6, size) end,
   isImageReady = function() return true end,
@@ -109,7 +111,8 @@ for _ = 1, 600 do   -- 30 s of the demo at 20 fps
     worstX, worstY = math.max(worstX, r[2].x - W), math.max(worstY, r[2].y - Hh)
   end
   if rec.rects[1] then assert(rec.rects[1][1].x <= 4, "the first thing drawn starts at the window's corner: " .. rec.rects[1][1].x) end
-  assert(depth == 0, "clips are balanced every frame")
+  assert(depth == 0, "clips are balanced every frame: " .. depth)
+  assert(fontDepth == 0, "font pushes are balanced every frame: " .. fontDepth)
   assert(rec.unclipped == 0 and rec.unclippedGlyph == 0, "text is only ever drawn inside a clip")
   allText = allText .. "|" .. frameText()
 end
@@ -264,7 +267,7 @@ assert(not partial and full, "DirectWrite without a clip: no text while the pane
 H.store.glyph = 2
 
 -- a letter we have no picture for is drawn as a question mark, and an accent works
-ui.pushClipRect = function(a, b) depth = depth + 1; areas[depth] = (b.x - a.x) * (b.y - a.y); return true end
+ui.pushClipRect = function() depth = depth + 1 end
 handlers["HLH.Banners.lines"]("id=w;img=flag-yellow;kind=action;c=1,1,0;title=\xD0\x96\xC3\x91;sub=X;ev=1")
 for i = 1, 40 do
   handlers["HLH.Banners.lines"]("id=w;img=flag-yellow;kind=action;c=1,1,0;title=\xD0\x96\xC3\x91;sub=X;ev=1")
