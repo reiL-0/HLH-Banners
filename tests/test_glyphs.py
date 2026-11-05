@@ -30,10 +30,15 @@ def test_a_letter_we_have_no_glyph_for_becomes_a_question_mark_not_an_error():
     assert glyphs.layout("Ж", 20, 100) == [(0.0, ord("?"))]
 
 
+def test_the_sharper_set_is_used_when_the_text_is_drawn_bigger():
+    assert glyphs.pick("t", 20) == "t2" and glyphs.pick("t", 40) == "t2" and glyphs.pick("t", 41) == "t4" and glyphs.pick("t", 60) == "t4"
+    assert glyphs.pick("s", 12) == "s2" and glyphs.pick("s", 24) == "s2" and glyphs.pick("s", 36) == "s4"
+
+
 def test_the_quads_keep_the_proportions_of_the_pictures():
-    w, h = glyphs.quad_size("t", 20)
+    w, h = glyphs.quad_size("t2", 20)
     assert (w, h) == (12.0, 26.5), (w, h)   # a 24 x 53 picture drawn at half size
-    w, h = glyphs.quad_size("s", 12)
+    w, h = glyphs.quad_size("s2", 12)
     assert abs(w - 7.5) < 1e-9 and abs(h - 16.0) < 1e-9, (w, h)
 
 

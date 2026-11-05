@@ -1,36 +1,39 @@
 # Probe (draft that doubles as the first version of the app)
 
-Answers the open questions before the real app is finished. **Nothing here has run inside Assetto Corsa yet.**
-The pure parts are tested on a desktop (`python3 tests/test_capsule.py`, `test_guard.py`, `test_app_smoke.py`); what the game's calls really do is what this session finds out.
+What the first game sessions showed: the GL drawing and the animation work; AC labels cannot be put over our drawing or clipped, so the text is drawn as glyph quads; `winsound` plays.
+Still open: everything marked below. The pure parts are tested on a desktop (`python3 tests/test_*.py`); what the game's calls really do is what these sessions find out.
 
 ## Install (on the PC where you play)
-The `apps/` folder of this repository has the same layout as `<AC>/apps/` (`<AC>` = `steamapps/common/assettocorsa`). Copy its two folders:
+The `apps/` folder of this repository has the same layout as `<AC>/apps/` (`<AC>` = `steamapps/common/assettocorsa`). Replace/copy these folders (delete the old `hlh_banners` first so no old file stays):
 
-1. `apps/python/hlh_banners` -> `<AC>/apps/python/hlh_banners`  (with its `icons/` folder inside)
-2. `apps/lua/hlh_banners_probe` -> `<AC>/apps/lua/hlh_banners_probe`  (this one needs Custom Shaders Patch)
+1. `apps/python/hlh_banners` -> `<AC>/apps/python/hlh_banners`   (the banners: no buttons, its window is only as big as the banners)
+2. `apps/python/hlh_banners_settings` -> `<AC>/apps/python/hlh_banners_settings`   (a small window with buttons; open it, set things, close it)
+3. `apps/lua/hlh_banners_probe` -> `<AC>/apps/lua/hlh_banners_probe`   (only to test the link with a CSP script; needs Custom Shaders Patch)
 
-Download: https://github.com/reiL-0/HLH-Banners/archive/refs/heads/staging.zip (unzip it, copy the two folders).
+Download: https://github.com/reiL-0/HLH-Banners/archive/refs/heads/staging.zip
 
-In the game: start a practice session (alone is enough), open the app bar on the right of the screen and enable **HLH Banners probe** (the Python one, a window with four buttons) and **HLH Banners probe** (the Lua one, a small window with text).
-If `probe_result.txt` says `import socket FAIL`, copy a 32-bit Python 3.3 `Lib` into `hlh_banners/stdlib/`.
-Playing on Linux with Proton: the same folders, inside the Proton prefix's game folder; `Audio` (winsound) may not work there, and that is a valid answer to note.
+In the game (a practice session alone is enough) enable **HLH Banners** and **HLH Banners settings** in the app bar.
 
-## What to look at (write down what you see; then send `apps/python/hlh_banners/probe_result.txt`)
-| Button / thing | Question | Good answer |
+## What to do and look at
+| What | Question | Good answer |
 |---|---|---|
-| **Demo: on** | Does the capsule draw: rounded border, coloured badge, the icon, the pop, the text unfolding, folding, the closing in two steps? Four banners over 26 s: yellow (folds to the icon after 5 s), blue (keeps its text), track limits, winner (stays). | Looks like the preview (https://claude.ai/artifact/EdFFyHPdqXMJdrTCfH3fLf) |
-| the text | AC apps cannot clip or measure text. While the panel opens, is the text visible outside the capsule? Is the real width close to the estimate (the text should not touch the right edge)? | If it spills, we need another way (see below) |
-| **Mascara: on** | Does a plain quad drawn in the render callback hide the text label behind it? | Text cut at the panel's edge = the text can be clipped |
-| **Audio** | Do you hear a short burst of noise and a beep (winsound on a generated wav)? | Yes, and not too quiet |
-| **Idioma** | Cycles auto / es / en; is it kept after restarting AC? (`hlh_banners.ini`) | Kept |
-| closing AC | Does `probe_result.txt` end with `shutdown: port released`? | Yes |
+| Settings: **Mover banderas: on** | A grey banner "ARRASTRA AQUI" appears. Drag it where you want the flags. Does it move **exactly with the mouse**, without jumping to strange places? Move it near the edges of the screen too. Then turn it off. | Follows the mouse; the banners stay there |
+| Settings: **Demo: on** | Four banners over 26 s (yellow folds to the icon after 5 s, blue keeps its text, track limits, winner stays). Does the text show inside the capsule, readable and sharp? Does each new banner make a radio sound, one after another, never on top of each other? | Yes |
+| Settings: **Tamano** | Cycles 75 % ... 300 %. Is the text sharp at the sizes you would use? Does the window keep the banners in place when the size changes (it grows downwards from its corner)? | Sharp up to the size you need |
+| Settings: **Idioma** | auto / es / en. Does the demo text change language straight away? Is the choice kept after restarting AC? | Yes |
+| Settings: **Sonido** | 100 / 70 / 40 % / off. Is 100 % loud enough? Does "off" stop everything, also what was queued? | Yes |
+| Settings: **Probar audio** | One burst and a beep | Yes |
+| closing AC | Does `hlh_banners/probe_result.txt` end with `shutdown: port released`? | Yes |
+
+Then send `hlh_banners/probe_result.txt` and what you saw. A screenshot of the demo and one dragging the banners helps a lot.
 
 ## The CSP side
-The Lua app is `apps/lua/hlh_banners_probe` (installed above). Later, `probe/hlh_banners_probe.lua` is the same probe as an online script of a test server: the answer can differ between the two.
-It sends a yellow flag for 6 s and nothing for 6 s, every 150 ms. With the demo **off**, the capsule must open, fold at 5 s, and close by itself. The text under the CSP window must say
-`tick 200 {"render_age_ms": ..., "lang": "auto", "v": 1}` and `echo ... "sha256": "2cf24dba..."` (SHA-256 of "hello").
-Hide the app (the AC app bar): `render_age_ms` must keep growing while the answer stays 200 (that is why the hub looks at it, not at the 200).
+The Lua app `hlh_banners_probe` sends a yellow flag for 6 s and nothing for 6 s, every 150 ms. With the demo **off** the capsule must open, fold at 5 s and close by itself, and make its radio sound once per appearance.
+Its small window must say `tick 200 {"render_age_ms": ..., "lang": "auto", "v": 1}` and `echo ... "sha256": "2cf24dba..."` (SHA-256 of "hello"). The answer can differ when the same probe runs as an online script of a test server
+(`probe/hlh_banners_probe.lua`): the permissions of a server script are not the same as an app's.
+If the Lua app does not show in the app bar, tell me: its manifest was written from memory of how CSP apps are described.
 
-## If the text cannot be clipped
-Plan B, in this order: (1) reveal the text only once its panel is fully open and hide it before it folds (the capsule moves, the text fades in/out); (2) draw the texts as small images the hub
-renders... not possible from CSP; (3) move the drawing to a CSP Lua app (`apps/lua`, which has clip rectangles and text measure), which the earlier debate preferred.
+## If something fails
+- `import socket FAIL` in `probe_result.txt`: copy a 32-bit Python 3.3 `Lib` into `hlh_banners/stdlib/`.
+- Text too small/blurry: pick a bigger size; at 250 % and above the app uses a sharper set of letters.
+- The window jumps when dragged: say where it ends up compared to where you dropped it (the window is now only as big as the banners, which should fix it).

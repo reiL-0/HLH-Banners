@@ -3,4 +3,5 @@ __pycache__/
 probe_result.txt
 hlh_beep.wav
 hlh_banners.ini
+hlh_banners.ini.tmp
 stdlib/

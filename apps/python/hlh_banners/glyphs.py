@@ -3,7 +3,7 @@
 import math
 
 ADV, LINE = 0.6, 1.32   # advance and line height, in em
-SETS = {"t": 40, "s": 24}   # glyph set -> the pointsize it was rendered at (tools/make_glyphs.py); the app draws it at half of that
+SETS = {"t2": 40, "s2": 24, "t4": 80, "s4": 48}   # glyph set -> the pointsize it was rendered at (tools/make_glyphs.py): "2" = made for texts drawn at 20/12 px up to 2x those sizes, "4" for more
 CHARS = [chr(c) for c in range(33, 127) if chr(c) != "\\"] + list("áéíóúüñÁÉÍÓÚÜÑ¿¡·°ºªçÇàèìòùâêîôûäëïöÿÀÈÌÒÙÂÊÎÔÛÄËÏÖ€")
 KNOWN = set(ord(c) for c in CHARS)
 
@@ -33,3 +33,8 @@ def layout(text, size, reveal):
         if ch != " ":
             out.append((i * adv, code_of(ch)))
     return out
+
+
+def pick(kind, size):
+    """The glyph set for a text drawn at `size` px: kind is "t" (title) or "s" (subtitle). The smallest set that is not smaller than the text, so it is drawn at 1:1 or reduced, never enlarged."""
+    return kind + "2" if size <= SETS[kind + "2"] else kind + "4"
