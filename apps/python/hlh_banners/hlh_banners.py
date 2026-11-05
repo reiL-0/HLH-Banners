@@ -74,7 +74,7 @@ def refresh_settings(now):
     cfg.update(hlh_settings.load(INI))
     if cfg != old and state["ini_reads"] < 20:
         state["ini_reads"] += 1
-        note("settings read", "%s -> lang=%s demo=%s move=%s scale=%s sound=%s origin=%s" % (INI, cfg["lang"], cfg["demo"], cfg["move"], cfg["scale"], cfg["sound"], cfg["origin"]))
+        note("settings read", "%s -> lang=%s demo=%s move=%s scale=%s sound=%s" % (INI, cfg["lang"], cfg["demo"], cfg["move"], cfg["scale"], cfg["sound"]))
     if cfg["sound"] == 0:   # sound off: whatever was waiting its turn is dropped, not played later
         del sounds["pending"][:]
     if cfg["sound"] != old.get("sound") and cfg["sound"] > 0:
@@ -388,9 +388,9 @@ def on_render(delta):
     now = time.time()
     state["last_render"] = now
     refresh_settings(now)
-    # The game draws an app's GL in the WINDOW's own coordinates (0,0 = its corner): adding the window's place on the screen counted it twice, so the banners moved twice as fast as the window
-    # when dragged and their coloured shapes ended outside the window, where the game cuts them. "Origen: abs" in the settings is there in case a game does it the other way.
-    wx, wy = (0.0, 0.0) if cfg["origin"] == "rel" else ac.getPosition(app)
+    # The game draws an app's GL in the WINDOW's own coordinates (0,0 = its corner), measured in the game (the calibration marks drawn from the corner land on the window's corner, the ones drawn from
+    # getPosition land that far away): adding the window's place on the screen counted it twice, so the banners moved twice as fast as the window when dragged.
+    wx, wy = 0.0, 0.0
     if cfg["calib"]:
         px, py = ac.getPosition(app)
         pos = "POS %d,%d" % (px, py)
@@ -427,15 +427,10 @@ def acMain(ac_version):
     cfg.update(hlh_settings.load(INI))
     stack = capsule.Stack()
     app = ac.newApp("HLH Banners")
-    for call, args in ((ac.setBackgroundOpacity, (app, 0)), (ac.drawBackground, (app, 0)), (ac.drawBorder, (app, 0)), (ac.setTitle, (app, "")), (ac.setIconPosition, (app, 0, -10000))):
-        try:
-            call(*args)
-        except Exception as e:
-            note("window", "%s FAIL %r" % (getattr(call, "__name__", call), e))
-    try:
-        ac.setBackgroundTexture(app, os.path.join(HERE, "blank.png"))   # the game draws this (nothing) instead of its grey box
-    except Exception as e:
-        note("window", "setBackgroundTexture FAIL %r" % (e,))
+    # Exactly these two and nothing else: in the first game session (coloured shapes visible, no grey box) the window had only these. Adding drawBackground / setTitle / setIconPosition / a background picture
+    # was followed by the coloured shapes disappearing and the game's grey box showing up.
+    ac.setBackgroundOpacity(app, 0)
+    ac.drawBorder(app, 0)
     size = footprint([], cfg["scale"])
     state["size"] = size
     ac.setSize(app, size[0], size[1])

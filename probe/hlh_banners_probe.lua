@@ -25,7 +25,7 @@ function script.update(dt)
   post("/tick", ((t - t0) % 12) < 6 and lines(lang) or OFF, function(err, resp)
     local l = resp and type(resp.body) == "string" and resp.body:match('"lang":%s*"(%a+)"')
     if l then lang = l end
-    shown = err and ("tick error: " .. tostring(err)) or ("tick " .. tostring(resp and (resp.status or resp.code)) .. " " .. tostring(resp and resp.body))
+    shown = err and ("tick error: " .. tostring(err)) or ("probe v2 (follows the language) sending lang=" .. lang .. " | tick " .. tostring(resp and (resp.status or resp.code)) .. " " .. tostring(resp and resp.body))
   end)
   if not echoed then
     echoed = true

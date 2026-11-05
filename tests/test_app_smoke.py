@@ -92,23 +92,18 @@ def test_the_banners_app_end_to_end_against_a_stand_in():
     import ipc
     fake_ac.getPosition.return_value = (500.0, 300.0)
     app.state["lines"] = ipc.validate_lines(good)
-    for origin, lo in (("rel", (0.0, 0.0)), ("abs", (500.0, 300.0))):
-        settings(scale=1.0, sound=0, origin=origin)
-        app.state["lines_at"] = time.time()
-        fake_ac.glVertex2f.reset_mock(); fake_ac.glQuadTextured.reset_mock()
-        frames(1.0)
-        W, H = app.state["size"]
-        xs = [c.args[0] for c in fake_ac.glVertex2f.call_args_list] + [q.args[0] for q in fake_ac.glQuadTextured.call_args_list]
-        ys = [c.args[1] for c in fake_ac.glVertex2f.call_args_list] + [q.args[1] for q in fake_ac.glQuadTextured.call_args_list]
-        assert xs and min(xs) >= lo[0] and min(ys) >= lo[1], (origin, min(xs), min(ys))
-        if origin == "rel":
-            ex = [q.args[0] + q.args[2] for q in fake_ac.glQuadTextured.call_args_list]
-            ey = [q.args[1] + q.args[3] for q in fake_ac.glQuadTextured.call_args_list]
-            assert max(xs + ex) <= W and max(ys + ey) <= H, "everything drawn is inside the window's own rectangle %dx%d: %r %r" % (W, H, max(xs + ex), max(ys + ey))
-        else:
-            assert max(xs) > 500, "'abs' starts at the window's place on the screen"
+    settings(scale=1.0, sound=0)
+    app.state["lines_at"] = time.time()
+    fake_ac.glVertex2f.reset_mock(); fake_ac.glQuadTextured.reset_mock()
+    frames(1.0)
+    W, H = app.state["size"]
+    xs = [c.args[0] for c in fake_ac.glVertex2f.call_args_list] + [q.args[0] for q in fake_ac.glQuadTextured.call_args_list]
+    ys = [c.args[1] for c in fake_ac.glVertex2f.call_args_list] + [q.args[1] for q in fake_ac.glQuadTextured.call_args_list]
+    ex = [q.args[0] + q.args[2] for q in fake_ac.glQuadTextured.call_args_list]
+    ey = [q.args[1] + q.args[3] for q in fake_ac.glQuadTextured.call_args_list]
+    assert xs and min(xs) >= 0 and min(ys) >= 0 and max(xs + ex) <= W and max(ys + ey) <= H, "everything drawn is inside the window's own rectangle %dx%d: %r %r" % (W, H, max(xs + ex), max(ys + ey))
     fake_ac.getPosition.return_value = (100.0, 100.0)
-    settings(scale=1.0, sound=100, origin="rel")
+    settings(scale=1.0, sound=100)
     app.state["lines_at"] = 0.0   # the hub went quiet
     frames(3)
     assert app.state["size"][1] == 64 + 12 and app.stack.caps == {}, "with nothing on screen: the room of one banner, not a big box: %r" % (app.state["size"],)

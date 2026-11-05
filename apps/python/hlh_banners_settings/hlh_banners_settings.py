@@ -26,7 +26,6 @@ def text_of(key):
             "lang": "Idioma: " + s["lang"],
             "scale": "Tamano: %d%%" % round(s["scale"] * 100),
             "sound": "Sonido: " + ("off" if s["sound"] == 0 else "%d%%" % s["sound"]),
-            "origin": "Origen: " + s["origin"],
             "calib": "Calibrar: " + ("on" if s["calib"] else "off")}[key]
 
 
@@ -83,10 +82,6 @@ def on_calib(*a):
     change(lambda: state.update(calib=not state["calib"]))
 
 
-def on_origin(*a):
-    change(lambda: state.update(origin=hlh_settings.cycle(hlh_settings.ORIGINS, state["origin"])))
-
-
 def on_sound(*a):
     change(lambda: state.update(sound=hlh_settings.cycle(hlh_settings.VOLUMES, state["sound"])))
 
@@ -99,7 +94,7 @@ def acMain(ac_version):
     status = ac.addLabel(app, "ajustes: " + INI)
     ac.setPosition(status, 10, 186)
     ac.setFontSize(status, 12)
-    for i, (key, fn) in enumerate((("move", on_move), ("demo", on_demo), ("audio", on_audio), ("lang", on_lang), ("scale", on_scale), ("sound", on_sound), ("origin", on_origin), ("calib", on_calib))):
+    for i, (key, fn) in enumerate((("move", on_move), ("demo", on_demo), ("audio", on_audio), ("lang", on_lang), ("scale", on_scale), ("sound", on_sound), ("calib", on_calib))):
         b = ac.addButton(app, text_of(key))
         ac.setPosition(b, 10 + (i % 2) * 195, 36 + (i // 2) * 30)
         ac.setSize(b, 185, 26)

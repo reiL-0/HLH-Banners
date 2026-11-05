@@ -9,3 +9,23 @@ OK lang=es demo=on en tmpmfv7or45
 OK lang=es demo=on en tmpmfv7or45
 OK lang=en demo=on en tmpmfv7or45
 ERROR al guardar: PermissionError('read-only')
+OK lang=es demo=off en tmpmpb8ihgn
+OK lang=es demo=off en tmpmpb8ihgn
+OK lang=es demo=off en tmpmpb8ihgn
+OK lang=es demo=off en tmpmpb8ihgn
+OK lang=es demo=on en tmpmpb8ihgn
+OK lang=es demo=on en tmpmpb8ihgn
+OK lang=es demo=on en tmpmpb8ihgn
+OK lang=es demo=on en tmpmpb8ihgn
+OK lang=en demo=on en tmpmpb8ihgn
+ERROR al guardar: PermissionError('read-only')
+OK lang=es demo=off en tmpvual_jom
+OK lang=es demo=off en tmpvual_jom
+OK lang=es demo=off en tmpvual_jom
+OK lang=es demo=off en tmpvual_jom
+OK lang=es demo=on en tmpvual_jom
+OK lang=es demo=on en tmpvual_jom
+OK lang=es demo=on en tmpvual_jom
+OK lang=es demo=on en tmpvual_jom
+OK lang=en demo=on en tmpvual_jom
+ERROR al guardar: PermissionError('read-only')

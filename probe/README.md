@@ -19,9 +19,8 @@ In the game (a practice session alone is enough) enable **HLH Banners** and **HL
 |---|---|---|
 | Settings: **Mover banderas: on** | A grey banner "ARRASTRA AQUI" appears. Drag it where you want the flags. Does it move **exactly with the mouse**, without jumping to strange places? Move it near the edges of the screen too. Then turn it off. | Follows the mouse; the banners stay there |
 | Settings: **Demo: on** | Four banners over 26 s (yellow folds to the icon after 5 s, blue keeps its text, track limits, winner stays). Does the text show inside the capsule, readable and sharp? Does each new banner make a radio sound, one after another, never on top of each other? | Yes |
-| Settings: **Calibrar: on** | Draws marks in two ways at once and says what the game reports: the window's own corner (RED, GREEN, BLUE squares, "REL POS x,y") and the window's place on the screen (YELLOW, MAGENTA, CYAN squares, "ABS ..."), each with the yellow flag icon, plus a line "INI ok L=en D=on" (what the banners app found in the settings file). **Take a screenshot with it on**, and another after dragging the window somewhere else. Which squares are inside the window? Are they coloured? Is the text readable? | Tells me where the game puts the drawing |
+| Settings: **Calibrar: on** | Draws marks in two ways at once and says what the game reports: the window's own corner (RED, GREEN, BLUE squares, "REL POS x,y") and the window's place on the screen (YELLOW, MAGENTA, CYAN squares, "ABS ..."), each with the yellow flag icon, plus a line "INI ok L=en D=on" (what the banners app found in the settings file). **Take a screenshot with it on**, and another after dragging the window somewhere else. In the last test the marks from the window's corner (REL) landed on the window's corner: that is how the app draws now. The coloured squares and the dark boxes must be visible this time. | Squares and boxes coloured |
 | Settings: status line | The last line of the settings window says what it saved (`OK lang=en demo=on en hlh_banners`) or the error. If you press **Idioma** and the line says OK but the banners keep the old language, tell me what the calibration line `INI ... L=` says. | OK, and the banners follow |
-| Settings: **Origen** | Leave it on **rel**. Only if the banners still do not follow the window when you drag it, or their colours (border, background, coloured square) are missing, press it to **abs** and tell me which of the two works. | rel works |
 | Settings: **Tamano** | Cycles 75 % ... 300 %. Is the text sharp at the sizes you would use? Does the window keep the banners in place when the size changes (it grows downwards from its corner)? | Sharp up to the size you need |
 | Settings: **Idioma** | auto / es / en. Does the demo text change language straight away? Is the choice kept after restarting AC? | Yes |
 | Settings: **Sonido** | 100 / 70 / 40 % / off. Is 100 % loud enough? Does "off" stop everything, also what was queued? | Yes |
@@ -34,8 +33,9 @@ Then send `hlh_banners/probe_result.txt` and what you saw. A screenshot of the d
 
 ## The CSP side
 The Lua app `hlh_banners_probe` sends a yellow flag for 6 s and nothing for 6 s, every 150 ms. With the demo **off** the capsule must open, fold at 5 s and close by itself, and make its radio sound once per appearance.
-Its small window must say `tick 200 {"render_age_ms": ..., "lang": "auto", "v": 1}` and `echo ... "sha256": "2cf24dba..."` (SHA-256 of "hello"). The answer can differ when the same probe runs as an online script of a test server
+Its small window must say `probe v2 (follows the language) sending lang=... | tick 200 {"render_age_ms": ..., "lang": "auto", "v": 1}` and `echo ... "sha256": "2cf24dba..."` (SHA-256 of "hello"). The answer can differ when the same probe runs as an online script of a test server
 (`probe/hlh_banners_probe.lua`): the permissions of a server script are not the same as an app's.
+If it does not say `probe v2`, the old Lua folder is still installed (delete it and copy the new one: the old one sends Spanish whatever you choose).
 If the Lua app does not show in the app bar, tell me: its manifest was written from memory of how CSP apps are described.
 
 ## If something fails
