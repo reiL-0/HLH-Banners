@@ -332,4 +332,33 @@ script.windowSettings(0.05)
 assert(not table.concat(listed, "\n"):find("AVISO", 1, true), "and the warning goes when the script stops")
 local blob = table.concat(listed, "\n")
 assert(blob:find("ui.MediaPlayer: NO", 1, true) and blob:find("ui.drawRect: si", 1, true) and blob:find("carpeta de la app: /app", 1, true), "the diagnostics say what the game offers")
+-- ---- groups: the alerts and the info have their own windows; a group whose window is not open puts its banners in the main one ---------------------------------------------------------------------
+H.store.demo = 0
+local G = H.groups
+local function gframe(dt, open)   -- `open`: the windows drawn this frame
+  script.update(dt)
+  reset(); cur = V(0, 0); depth = 0
+  for _, name in ipairs(open) do script[({ flags = "windowBanners", alerts = "windowAlerts", info = "windowInfo" })[name]](dt) end
+end
+local ALERT = "id=azul;img=flag-blue;kind=action;c=0.16,0.47,1;title=AZUL;sub=DEJA PASAR;ev=1;grp=alerts"
+local INFO = "id=lim;img=track-limits;kind=info;c=0.36,0.42,0.75;title=LIMITES;sub=;ev=1"   -- (no grp: it goes by its icon)
+local FLAG = "id=flag;img=flag-yellow;kind=info;c=1,0.757,0.027;title=AMARILLA;sub=;ev=1"
+local function feed(payload, frames_, open) for i = 1, frames_ do if i % 3 == 1 then handlers["HLH.Banners.lines"](payload) end gframe(0.05, open) end end
+local ALL = ALERT .. "\n" .. INFO .. "\n" .. FLAG
+feed("", 6, { "flags", "alerts", "info" })   -- (the windows are drawn once before the banners come: that is how the app knows they are open)
+feed(ALL, 12, { "flags", "alerts", "info" })
+assert(#G.flags.entries == 1 and G.flags.entries[1].line.id == "flag" and #G.alerts.entries == 1 and G.alerts.entries[1].line.id == "azul" and #G.info.entries == 1 and G.info.entries[1].line.id == "lim", "each banner in the window of its group (by grp, else by its icon)")
+alive = 0; bcast = {}
+feed(ALL, 12, { "flags", "alerts", "info" })
+local payloads = {} for _, b in ipairs(bcast) do if b[1] == "HLH.Banners.alive" then payloads[b[2]] = true end end
+assert(payloads["flags,alerts,info"], "the heartbeat says which windows are open")
+feed(ALL, 30, { "flags", "info" })   -- the alerts window is closed
+assert(#G.alerts.entries == 0 and #G.flags.entries == 2 and #G.info.entries == 1, "a group whose window is closed shows its banners in the main one")
+feed(ALL, 30, { "alerts" })   -- the main window is closed too: the heartbeat stops (the script draws them itself)
+bcast = {}
+feed(ALL, 12, { "alerts" })
+for _, b in ipairs(bcast) do assert(b[1] ~= "HLH.Banners.alive", "no heartbeat without the main window") end
+assert(H.parseLines(ALERT) and H.parseLines(ALERT)[1].grp == "alerts" and H.parseLines((ALERT:gsub("grp=alerts", "grp=elsewhere"))) == nil and H.parseLines(FLAG)[1].grp == nil, "grp is one of the known groups or absent")
+assert(H.groupOf("flag-blue") == "alerts" and H.groupOf("danger-ahead") == "alerts" and H.groupOf("track-limits") == "info" and H.groupOf("flag-yellow") == "flags" and H.groupOf("winner") == "flags", "the default group by icon")
+
 print("lua app ok")

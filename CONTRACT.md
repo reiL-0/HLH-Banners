@@ -18,11 +18,14 @@ id=flag;img=flag-yellow;kind=info;c=1,0.757,0.027;title=AMARILLA;sub=PRECAUCION 
 - `kind`: `info` (the text folds to the icon after 5 s), `action` (the text stays while it applies), `sticky` (stays until the script stops sending it, i.e. until the session restarts).
 - `c`: the badge/border colour, three numbers 0..1. `title`, `sub`: the text, **already in the driver's language** (at most 80 characters, no `;` and no control characters). `ev`: changes when the same banner happens
   again (a new cut): the capsule opens again.
+- `grp` (optional): the window the banner belongs to, `flags` (the track's flag, the winner: the main window), `alerts` (urgent and personal: blue flag, danger ahead, give the place back, penalties) or `info`
+  (track limits, pit lane, restarts). Without it the app decides by the icon. Each group is a window of the app that the driver moves, scales and switches on by itself; a group whose window is not
+  open shows its banners in the main one. Any other value refuses the payload.
 - An empty string = no banners. A payload with **one** bad line is refused whole and changes nothing on the screen. If no payload arrives for 1 s the app falls back to its demo or to nothing.
 - The lines are **personal**: the script sends only what applies to this driver. The app does not filter or identify anyone.
 
 ## app -> script
-- `HLH.Banners.alive` (every 0.25 s, **only while the banners window is being drawn**): the script keeps drawing the banners itself unless this beats (the window can be hidden, closed, or the app not installed).
+- `HLH.Banners.alive` (every 0.25 s, **only while the main banners window is being drawn**; the payload lists the windows open, e.g. `flags,alerts`): the script keeps drawing the banners itself unless this beats (the window can be hidden, closed, or the app not installed).
 - `HLH.Banners.lang` (every 2 s and when it changes): `auto` | `es` | `en`, the driver's choice in the app's settings window. `auto` = the script uses its own (the account's language, else Spanish);
   otherwise the script asks its server for that language.
 

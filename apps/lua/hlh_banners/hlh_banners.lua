@@ -83,6 +83,7 @@ end
 -- ---- what a game script may send: one banner per line "id=..;img=..;kind=..;c=r,g,b;title=..;sub=..;ev=.." ----------------------------------------------------------------------------
 -- Validated like the Python app's ipc.py: an icon name is letters, digits and dashes only (it is looked up in the app's own folder, never a path or a URL), a short text, nothing else.
 local KINDS = { info = true, action = true, sticky = true }
+local GROUPS = { flags = true, alerts = true, info = true }   -- `grp`: which window a banner belongs to (optional: a line without it goes by its icon, see groupOf)
 local MAX_LINES, MAX_TEXT = 8, 80
 local function parseLines(payload)
   if type(payload) ~= "string" or #payload > 4096 then return nil end
@@ -96,9 +97,9 @@ local function parseLines(payload)
       r, g, b = tonumber(r), tonumber(g), tonumber(b)
       local ok = f.id and f.id:match("^[a-z0-9][a-z0-9%-]*$") and #f.id <= 40 and f.img and f.img:match("^[a-z0-9][a-z0-9%-]*$") and #f.img <= 40 and KINDS[f.kind]
         and r and g and b and r <= 1 and g <= 1 and b <= 1 and #(f.title or "") <= MAX_TEXT and #(f.sub or "") <= MAX_TEXT
-        and not (f.title or ""):find("%c") and not (f.sub or ""):find("%c") and (f.ev == nil or #f.ev <= 32)
+        and not (f.title or ""):find("%c") and not (f.sub or ""):find("%c") and (f.ev == nil or #f.ev <= 32) and (f.grp == nil or GROUPS[f.grp])
       if not ok then return nil end   -- a payload with one bad line is refused whole
-      out[#out + 1] = { id = f.id, img = f.img, kind = f.kind, c = { r, g, b }, title = f.title or "", sub = f.sub or "", ev = f.ev }
+      out[#out + 1] = { id = f.id, img = f.img, kind = f.kind, c = { r, g, b }, title = f.title or "", sub = f.sub or "", ev = f.ev, grp = f.grp }
     end
   end
   return out
@@ -117,10 +118,15 @@ local FONT = FOLDER and ("JetBrains Mono:" .. FOLDER .. "/fonts/JetBrainsMono-Ex
 
 -- ---- state ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 local clock, demoT = 0, 0
-local stack = newStack()
-local entries = {}                 -- what is drawn this frame
+-- The banners are split in groups, each one its own window the driver moves, scales and switches on or off by itself: `flags` (the flag of the track, the winner: the main window), `alerts` (what is meant for
+-- THIS driver and urgent: blue flag, danger ahead, give the place back, penalties) and `info` (track limits, pit lane, restarts). A group whose window is not open puts its banners in the main one.
+local ALERT_IMG = { ["flag-blue"] = true, ["give-back"] = true, ["danger-ahead"] = true, ["flag-black"] = true, ["flag-meatball"] = true, ["flag-bw"] = true, ["drive-through-pass"] = true, ["drive-through-pits"] = true, ["free-pass"] = true, ["wave-around"] = true }
+local INFO_IMG = { ["track-limits"] = true, ["pits-closed"] = true, ["pits-open"] = true, ["restart-lap"] = true, ["one-to-go"] = true, ["two-to-go"] = true }
+local function groupOf(img) return ALERT_IMG[img] and "alerts" or INFO_IMG[img] and "info" or "flags" end
+local function newGroup() return { stack = newStack(), entries = {}, colPos = {}, drawnAt = -1e9 } end   -- entries: what is drawn this frame; colPos: where each column glides to
+local groups = { flags = newGroup(), alerts = newGroup(), info = newGroup() }
 local incoming, incomingAt = nil, -1e9   -- the lines a game script sent, and when
-local drawnAt, aliveAt, langAt, lastLang = -1e9, 0, 0, nil
+local aliveAt, langAt, lastLang = 0, 0, nil
 local calls = { pending = {}, nextAt = 0, seen = {} }   -- the radio calls to play, one after another
 local audio = { status = "not tried", player = nil }
 local stat = { dwLines = 0, dwLast = 0, frames = 0, time = 0, fps = 0, worst = 0, worstNow = 0, created = 0, imgs = 0, imgsLast = 0, winCalls = 0, winRate = 0, delay = nil, delayMax = 0 }   -- measured by the app itself, from the time the game gives it each frame
@@ -359,12 +365,24 @@ function script.update(dt)
   else lines = {} end
   queueCalls(lines)
   if #calls.pending > 0 and clock >= calls.nextAt then table.remove(calls.pending, 1); calls.nextAt = clock + 0.4; playRadio() end
-  entries = stackUpdate(stack, lines, dt)
-  for _, e in ipairs(entries) do if not e.born then e.born = clock end end
+  local per = { flags = {}, alerts = {}, info = {} }
+  for _, l in ipairs(lines) do
+    local g = l.grp or groupOf(l.img)
+    if clock - groups[g].drawnAt >= 0.5 then g = "flags" end   -- (its window is not open: the main one shows it)
+    per[g][#per[g] + 1] = l
+  end
+  for name, gr in pairs(groups) do
+    gr.entries = stackUpdate(gr.stack, per[name], dt)
+    for _, e in ipairs(gr.entries) do if not e.born then e.born = clock end end
+  end
   preloadStep()
   if clock - aliveAt >= 0.25 then   -- the script keeps drawing the banners itself unless this beats: the window can be hidden or closed
     aliveAt = clock
-    if clock - drawnAt < 0.5 then broadcast(KEY_ALIVE, string.format("%.2f", clock)) end
+    if clock - groups.flags.drawnAt < 0.5 then   -- the payload says which windows are open (the script draws itself the banners of a group that is not, when the main one is not either)
+      local open = {}
+      for _, name in ipairs({ "flags", "alerts", "info" }) do if clock - groups[name].drawnAt < 0.5 then open[#open + 1] = name end end
+      broadcast(KEY_ALIVE, table.concat(open, ","))
+    end
   end
   if store.lang ~= lastLang or clock - langAt >= 2 then langAt, lastLang = clock, store.lang; broadcast(KEY_LANG, store.lang) end
 end
@@ -429,9 +447,10 @@ local function drawCapsule(e, k, x0)   -- at x0, the top-left of its place in th
   end
 end
 
-local colPos = {}   -- where each column is drawn: it glides to where the column belongs (so a column that appears or changes does not jump)
-function script.windowBanners(dt)
-  drawnAt = clock
+local function drawGroup(name, dt)
+  local gr = groups[name]
+  local entries, colPos = gr.entries, gr.colPos
+  gr.drawnAt = clock
   stat.winCalls = stat.winCalls + 1
   local k = store.scale
   local x0 = ui.getCursor()
@@ -475,11 +494,16 @@ function script.windowBanners(dt)
       ui.text(string.format("%d %-12s %-5s w=%.2f pop=%.2f esc=%.2f op=%.2f  col %d fila %d", i, e.id, c.s, c.w, c.pop, c.scale, c.fade, math.floor((i - 1) / rows), (i - 1) % rows))
     end
   end
-  seenWin.need, seenWin.drawn = { width, needH }, #entries   -- (and what the game really gave the window: it can be less than it asked for)
-  seenWin.maxDrawn = math.max(seenWin.maxDrawn, #entries)
-  local ws = safe(ui.windowSize)
-  if ws then seenWin.got = { ws.x, ws.y } end
+  if name == "flags" then
+    seenWin.need, seenWin.drawn = { width, needH }, #entries   -- (and what the game really gave the window: it can be less than it asked for)
+    seenWin.maxDrawn = math.max(seenWin.maxDrawn, #entries)
+    local ws = safe(ui.windowSize)
+    if ws then seenWin.got = { ws.x, ws.y } end
+  end
 end
+function script.windowBanners(dt) drawGroup("flags", dt) end
+function script.windowAlerts(dt) drawGroup("alerts", dt) end
+function script.windowInfo(dt) drawGroup("info", dt) end
 
 -- ---- the settings window ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 local WANT = { "ui.pushClipRect", "ui.popClipRect", "ui.drawRect", "ui.drawRectFilled", "ui.drawImage", "ui.isImageReady", "ui.measureDWriteText", "ui.dwriteText", "ui.pushDWriteFont",
@@ -517,7 +541,7 @@ function script.windowSettings(dt)
   ui.text("Diagnostico (que ofrece el juego):")
   for _, name in ipairs(WANT) do ui.text("  " .. name .. ": " .. (has(name) and "si" or "NO")) end
   ui.text("carpeta de la app: " .. tostring(FOLDER))
-  ui.text("banderas en pantalla: " .. #entries .. " (maximo visto " .. seenWin.maxDrawn .. ") en " .. math.ceil(#entries / math.max(1, store.rows)) .. " columna(s) de " .. store.rows .. " filas como maximo")
+  ui.text("banderas en pantalla: " .. #groups.flags.entries .. " + alertas " .. #groups.alerts.entries .. " + info " .. #groups.info.entries .. " (maximo visto " .. seenWin.maxDrawn .. ") en " .. math.ceil(#groups.flags.entries / math.max(1, store.rows)) .. " columna(s) de " .. store.rows .. " filas como maximo")
   ui.text("la ventana de banderas pide " .. (seenWin.need and string.format("%d x %d", seenWin.need[1], seenWin.need[2]) or "-") .. " px y el juego le da " .. (seenWin.got and string.format("%d x %d", seenWin.got[1], seenWin.got[2]) or "?") .. " px")
   ui.text("audio: " .. audio.status)
   ui.text("letras cargadas: " .. preload.ready .. " / " .. #allGlyphs .. " (preguntadas " .. preload.i .. ")")
@@ -525,5 +549,5 @@ function script.windowSettings(dt)
   ui.text("lineas de un script: " .. (incoming and "recibiendo" or "ninguna") .. " | ultima hace " .. (incoming and string.format("%.1f s", clock - incomingAt) or "-"))
 end
 
-if _G.__HLH_TEST then _G.__hlh = { atlasCodeAt = atlasCodeAt, glyphUV = glyphUV, stat = stat, glyphY = glyphY, codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
+if _G.__HLH_TEST then _G.__hlh = { groups = groups, groupOf = groupOf, atlasCodeAt = atlasCodeAt, glyphUV = glyphUV, stat = stat, glyphY = glyphY, codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
                                     KEYS = { KEY_LINES, KEY_LANG, KEY_ALIVE }, cycle = cycle, fullWidth = fullWidth, demoLines = demoLines } end
