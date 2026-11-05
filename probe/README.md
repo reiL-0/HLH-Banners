@@ -1,50 +1,35 @@
-# Probe (draft that doubles as the first version of the app)
+# Probe: the Lua app
 
-What the first game sessions showed: the GL drawing and the animation work; AC labels cannot be put over our drawing or clipped, so the text is drawn as glyph quads; `winsound` plays.
-Still open: everything marked below. The pure parts are tested on a desktop (`python3 tests/test_*.py`); what the game's calls really do is what these sessions find out.
+Decision (2026-11-05): the banners are a **CSP Lua app**. In the Python draft the game's grey frame could not be hidden, labels did not show over our drawing, and text could not be clipped or measured;
+the CSP Lua documentation gives the window flags `NO_BACKGROUND`, `NO_TITLE_BAR` and `AUTO_RESIZE` (https://github.com/ac-custom-shaders-patch/acc-lua-sdk/wiki/Lua-apps), and ImGui has clip rectangles and text measure.
+**Nothing here has run inside the game yet.** The logic is tested with a stand-in game (`luajit tests/test_lua_app.lua apps/lua/hlh_banners/hlh_banners.lua`); what the game's calls really do is what this session finds out.
 
-## Install (on the PC where you play)
-The `apps/` folder of this repository has the same layout as `<AC>/apps/` (`<AC>` = `steamapps/common/assettocorsa`). Replace/copy these folders (delete the old `hlh_banners` first so no old file stays):
-
-1. `apps/python/hlh_banners` -> `<AC>/apps/python/hlh_banners`   (the banners: no buttons, its window is only as big as the banners)
-2. `apps/python/hlh_banners_settings` -> `<AC>/apps/python/hlh_banners_settings`   (a small window with buttons; open it, set things, close it)
-3. `apps/lua/hlh_banners_probe` -> `<AC>/apps/lua/hlh_banners_probe`   (only to test the link with a CSP script; needs Custom Shaders Patch)
+## Install (on the PC where you play; needs Custom Shaders Patch)
+Delete the old HLH folders first (`apps/python/hlh_banners*`, `apps/lua/hlh_banners_probe`), then copy from this repository's `apps/lua/` to `<AC>/apps/lua/` (`<AC>` = `steamapps/common/assettocorsa`):
+1. `hlh_banners`  (the app: two windows, the banners and the settings)
+2. `hlh_banners_probe`  (plays the hub's part: sends banners to the app and shows what comes back)
 
 Download: https://github.com/reiL-0/HLH-Banners/archive/refs/heads/staging.zip
 
-In the game (a practice session alone is enough) enable **HLH Banners** and **HLH Banners settings** in the app bar.
+In the game (a practice session alone is enough) enable **HLH Banners** (it opens two windows: the frameless banners and "HLH Banners settings") and **HLH Banners probe** in the app bar.
 
-## What to do and look at
+## What to look at
 | What | Question | Good answer |
 |---|---|---|
-| Settings: **Mover banderas: on** | A grey banner "ARRASTRA AQUI" appears. Drag it where you want the flags. Does it move **exactly with the mouse**, without jumping to strange places? Move it near the edges of the screen too. Then turn it off. | Follows the mouse; the banners stay there |
-| Settings: **Demo: on** | Four banners over 26 s (yellow folds to the icon after 5 s, blue keeps its text, track limits, winner stays). Does the text show inside the capsule, readable and sharp? Does each new banner make a radio sound, one after another, never on top of each other? | Yes |
-| Settings: **Calibrar: on** | Draws marks in two ways at once and says what the game reports: the window's own corner (RED, GREEN, BLUE squares, "REL POS x,y") and the window's place on the screen (YELLOW, MAGENTA, CYAN squares, "ABS ..."), each with the yellow flag icon, plus a line "INI ok L=en D=on" (what the banners app found in the settings file). **Take a screenshot with it on**, and another after dragging the window somewhere else. In the last test the marks from the window's corner (REL) landed on the window's corner: that is how the app draws now. The coloured squares and the dark boxes must be visible this time. | Squares and boxes coloured |
-| Settings: status line | The last line of the settings window says what it saved (`OK lang=en demo=on en hlh_banners`) or the error. If you press **Idioma** and the line says OK but the banners keep the old language, tell me what the calibration line `INI ... L=` says. | OK, and the banners follow |
-| Settings: **Tamano** | Cycles 75 % ... 300 %. Is the text sharp at the sizes you would use? Does the window keep the banners in place when the size changes (it grows downwards from its corner)? | Sharp up to the size you need |
-| Settings: **Idioma** | auto / es / en. Does the demo text change language straight away? Is the choice kept after restarting AC? | Yes |
-| Settings: **Sonido** | 100 / 70 / 40 % / off. Is 100 % loud enough? Does "off" stop everything, also what was queued? | Yes |
-| Settings: **Probar audio** | One burst and a beep | Yes |
-| closing AC | Does `hlh_banners/probe_result.txt` end with `shutdown: port released`? | Yes |
+| The banners window | With the demo on (default): is there **any grey box or title** around the banners, with the mouse visible or hidden, still or while you move it? Can you move it (drag the banners)? Does it stay where you leave it, also after restarting AC? | No frame at all; moves; remembered |
+| The capsule | Rounded border, coloured badge with the flag icon, pop, the text unfolding, folding to the icon after 5 s (yellow, track limits), staying (blue), the winner staying, the two-step closing? Is the text **cut at the panel's edge** while it opens? Typeface (JetBrains Mono) or a plain one? | As in the preview (https://claude.ai/artifact/EdFFyHPdqXMJdrTCfH3fLf) |
+| Settings window: **Tamano** | 75 % ... 300 %: is it sharp and does the window follow the size? | Yes |
+| Settings window: **Idioma** | The demo text changes language straight away? Kept after restarting AC? | Yes |
+| Settings window: **Sonido / Probar audio** | A short burst and a beep, one per new banner, one after another? (`audio:` in the diagnostics says what happened) | Yes, loud enough |
+| Settings window: **Diagnostico** | Which functions say **NO**? (`ui.pushClipRect`, `ui.drawRect`, `ui.measureDWriteText`, `ui.MediaPlayer`, `ac.onSharedEvent`...) | All **si** |
+| Probe window | `heartbeat from the app: ... s ago` and `sent: N`. With the probe running, its yellow flag replaces the demo, in the language you picked in the settings | Heartbeat arrives; the language follows |
 
-While the Lua probe app is enabled its yellow flag takes the place of the demo's (it is the script's line; it asks the app for the language, so **Idioma** changes its text too). To see only the demo, close the Lua app.
+Then take a screenshot of the banners (with and without the mouse), of the settings window with its diagnostics, and of the probe window.
 
-Then send `hlh_banners/probe_result.txt` and what you saw. A screenshot of the demo and one dragging the banners helps a lot.
-
-## The CSP side
-The Lua app `hlh_banners_probe` sends a yellow flag for 6 s and nothing for 6 s, every 150 ms. With the demo **off** the capsule must open, fold at 5 s and close by itself, and make its radio sound once per appearance.
-Its small window must say `probe v2 (follows the language) sending lang=... | tick 200 {"render_age_ms": ..., "lang": "auto", "v": 1}` and `echo ... "sha256": "2cf24dba..."` (SHA-256 of "hello"). The answer can differ when the same probe runs as an online script of a test server
-(`probe/hlh_banners_probe.lua`): the permissions of a server script are not the same as an app's.
-If it does not say `probe v2`, the old Lua folder is still installed (delete it and copy the new one: the old one sends Spanish whatever you choose).
-If the Lua app does not show in the app bar, tell me: its manifest was written from memory of how CSP apps are described.
-
-
-## A frameless window, the way the documentation says (Lua)
-The Lua app now has a **second window**, "HLH Banner (frameless test)": its manifest uses the official window flags `NO_BACKGROUND`, `NO_TITLE_BAR` and `AUTO_RESIZE`
-([CSP Lua apps wiki](https://github.com/ac-custom-shaders-patch/acc-lua-sdk/wiki/Lua-apps)). Enable it in the app bar. Look for: **no grey box, no title** at any time (also with the mouse visible, and while you move it),
-a yellow-bordered capsule with a yellow square, and the text **cut at 200 px** ("AMARILLA - TEXTO MUY LARGO..." must not overflow). That is the same drawing the hub does with ImGui calls, so it also tests them.
+## The same probe as an online script
+`probe/hlh_banners_probe.lua` is the same probe as a script of a test server (a server's script is what the hub will be): does a **server** script reach the app through shared events? The answer can differ from the app one.
 
 ## If something fails
-- `import socket FAIL` in `probe_result.txt`: copy a 32-bit Python 3.3 `Lib` into `hlh_banners/stdlib/`.
-- Text too small/blurry: pick a bigger size; at 250 % and above the app uses a sharper set of letters.
-- The window jumps when dragged: say where it ends up compared to where you dropped it (the window is now only as big as the banners, which should fix it).
+- The app does not appear in the app bar: tell me; the manifest was written from the documentation, not from a working example.
+- The text is not clipped: the diagnostics will say `ui.pushClipRect: NO`; the app then draws text only once the panel is fully open.
+- No icons: `carpeta de la app:` in the diagnostics shows the path the game gave; `None`/`nil` means icons and sound cannot be found.

@@ -1,38 +1,39 @@
--- PROBE (throwaway): can a CSP script talk to the HLH Banners app on 127.0.0.1? Run it as a script in any AC session (apps/lua or an online script, ONE of them: the answer can differ).
--- Every 150 ms it POSTs /tick with the lines it "composed" (a yellow flag for 6 s, then none for 6 s, in a loop): the app must draw the capsule, fold it, and close it.
--- On screen: what the app answered (render_age_ms: how long ago it last drew; lang: the language picked in the app) and the base64 round trip on /echo, once.
-local URL, HDR = "http://127.0.0.1:28761", { ["X-HLH-Init"] = "1" }
-local function lines(lang)   -- the script composes the text in the language the driver chose in the app (the answer's `lang`); "auto" = its own (Spanish here)
-  local title, sub = "AMARILLA", "PRECAUCION EN PISTA"
-  if lang == "en" then title, sub = "YELLOW", "CAUTION ON TRACK" end
-  return '{"v":1,"lines":[{"id":"flag","img":"flag-yellow","kind":"info","c":[1,0.757,0.027],"title":"' .. title .. '","sub":"' .. sub .. '","ev":"1"}]}'
-end
-local OFF = '{"v":1,"lines":[]}'
-local lang = "auto"
-local shown, nextAt, echoed, t0 = "waiting", 0, false, os.clock()
+-- PROBE (throwaway): does a game SCRIPT reach the HLH Banners app? It plays the part of the hub: every 150 ms it broadcasts, with ac.broadcastSharedEvent, the lines it "composed" (a yellow flag for 6 s,
+-- then none for 6 s, in the language the app announces), and it listens for the app's heartbeat (HLH.Banners.alive) and language (HLH.Banners.lang). Its window says what arrived.
+-- Run it as an app (apps/lua) first. The same file as an online script of a test server (probe/hlh_banners_probe.lua) tells if a SERVER script can talk to the app too: the answer can differ.
+local clock, nextAt, sent, aliveAt, lang, lastErr = 0, 0, 0, nil, "auto", nil
+local KEY_LINES, KEY_ALIVE, KEY_LANG = "HLH.Banners.lines", "HLH.Banners.alive", "HLH.Banners.lang"
+local hasBroadcast = type(ac.broadcastSharedEvent) == "function"
+local hasListen = type(ac.onSharedEvent) == "function"
 
-local function post(path, body, cb)
-  -- web.post's argument order is not certain: try (url, headers, body, cb), then (url, body, cb)
-  local ok = pcall(web.post, URL .. path, HDR, body, cb)
-  if not ok then ok = pcall(web.post, URL .. path, body, cb) end
-  if not ok then shown = "web.post to localhost raised an error" end
+local function lines(l)   -- the text in the language the app announces ("auto" = the script's own, Spanish here)
+  local title, sub = "AMARILLA", "PRECAUCION EN PISTA"
+  if l == "en" then title, sub = "YELLOW", "CAUTION ON TRACK" end
+  return "id=flag;img=flag-yellow;kind=info;c=1,0.757,0.027;title=" .. title .. ";sub=" .. sub .. ";ev=1"
+end
+
+if hasListen then
+  pcall(ac.onSharedEvent, KEY_ALIVE, function(data) aliveAt = clock end)
+  pcall(ac.onSharedEvent, KEY_LANG, function(data) if type(data) == "string" then lang = data end end)
 end
 
 function script.update(dt)
-  local t = os.clock()
-  if t < nextAt then return end
-  nextAt = t + 0.15
-  post("/tick", ((t - t0) % 12) < 6 and lines(lang) or OFF, function(err, resp)
-    local l = resp and type(resp.body) == "string" and resp.body:match('"lang":%s*"(%a+)"')
-    if l then lang = l end
-    shown = err and ("tick error: " .. tostring(err)) or ("probe v2 (follows the language) sending lang=" .. lang .. " | tick " .. tostring(resp and (resp.status or resp.code)) .. " " .. tostring(resp and resp.body))
-  end)
-  if not echoed then
-    echoed = true
-    post("/echo", "aGVsbG8=", function(err, resp) shown = shown .. " | echo " .. tostring(err or (resp and resp.body)) end)   -- "hello"
-  end
+  clock = clock + (dt or 0)
+  if clock < nextAt or not hasBroadcast then return end
+  nextAt = clock + 0.15
+  local ok, err = pcall(ac.broadcastSharedEvent, KEY_LINES, (clock % 12) < 6 and lines(lang) or "")
+  if ok then sent = sent + 1 else lastErr = tostring(err) end
+end
+
+local function report()
+  return {
+    "probe v3: sends the lines with ac.broadcastSharedEvent (" .. (hasBroadcast and "exists" or "MISSING") .. "), listens with ac.onSharedEvent (" .. (hasListen and "exists" or "MISSING") .. ")",
+    "sent: " .. sent .. (lastErr and (" | error: " .. lastErr) or ""),
+    "heartbeat from the app: " .. (aliveAt and string.format("%.1f s ago", clock - aliveAt) or "NOTHING YET (is HLH Banners enabled and its banners window open?)"),
+    "language the app announced: " .. lang,
+  }
 end
 
 function script.drawUI()
-  ui.transparentWindow("hlh_banners_probe", vec2(20, 160), vec2(900, 30), function() ui.text(shown) end)
+  ui.transparentWindow("hlh_banners_probe", vec2(20, 160), vec2(1000, 90), function() for _, t in ipairs(report()) do ui.text(t) end end)
 end
