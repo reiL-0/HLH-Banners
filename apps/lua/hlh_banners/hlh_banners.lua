@@ -105,8 +105,8 @@ local function parseLines(payload)
 end
 
 -- ---- settings (kept by the game between sessions) ----------------------------------------------------------------------------------------------------------------------------------------
-local SCALES, VOLUMES, LANGS = { 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0 }, { 100, 70, 40, 0 }, { "auto", "es", "en" }
-local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 1 }   -- glyph: 1 = the text as pictures of letters, 0 = DirectWrite (to compare)
+local SCALES, VOLUMES, LANGS, ROWS = { 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0 }, { 100, 70, 40, 0 }, { "auto", "es", "en" }, { 3, 4, 5, 6, 8, 12 }
+local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 1, rows = 5 }   -- rows: banners per column before a new column starts   -- glyph: 1 = the text as pictures of letters, 0 = DirectWrite (to compare)
 local store = safe(ac.storage, DEFAULTS) or DEFAULTS
 local function cycle(list, cur) for i, v in ipairs(list) do if v == cur then return list[i % #list + 1] end end return list[1] end
 
@@ -121,6 +121,7 @@ local incoming, incomingAt = nil, -1e9   -- the lines a game script sent, and wh
 local drawnAt, aliveAt, langAt, lastLang = -1e9, 0, 0, nil
 local calls = { pending = {}, nextAt = 0, seen = {} }   -- the radio calls to play, one after another
 local audio = { status = "not tried", player = nil }
+local seenWin = { need = nil, got = nil, drawn = 0, maxDrawn = 0 }   -- what the banners window asked for and what the game gave it (diagnostics)
 
 local DEMO = {
   es = { flag = { "AMARILLA", "PRECAUCION EN PISTA" }, blue = { "BANDERA AZUL", "DEJA PASAR AL MAS RAPIDO" }, limits = { "LIMITES DE PISTA", "LLEVAS 2/5 - TE QUEDAN 3" }, winner = { "GANADOR", "SOFIA RIOS" } },
@@ -212,11 +213,27 @@ local function codepoints(s)   -- UTF-8 -> code points (what the manager writes 
   return out
 end
 for _, cp in ipairs(codepoints("áéíóúüñÁÉÍÓÚÜÑ¿¡·°ºªçÇàèìòùâêîôûäëïöÿÀÈÌÒÙÂÊÎÔÛÄËÏÖ€")) do KNOWN[cp] = true end
+local cpCache, cpCount = {}, 0
+local function codepointsCached(s)   -- a text is decoded once, not on every frame
+  local c = cpCache[s]
+  if c then return c end
+  c = codepoints(s)
+  if cpCount > 400 then cpCache, cpCount = {}, 0 end
+  cpCache[s], cpCount = c, cpCount + 1
+  return c
+end
+local pathCache = {}
 local function glyphCode(cp) if cp == 32 then return nil end return KNOWN[cp] and cp or 0x3F end   -- a space only advances; a letter we have no picture for is a "?"
 local function pickSet(kind, size) return size <= SETS[kind .. "2"] and (kind .. "2") or (kind .. "4") end
 local function quadSize(set, size) local pt = SETS[set] return math.ceil(ADV * pt) * size / pt, math.ceil(LINE * pt) * size / pt end
-local function glyphPath(set, code) return FOLDER .. "/font/" .. set .. "/" .. string.format("%04x", code) .. ".png" end
-local function glyphWidth(text, size) return #codepoints(text) * ADV * size end
+local function glyphPath(set, code)   -- the path of a letter's picture, built once
+  local t = pathCache[set]
+  if not t then t = {}; pathCache[set] = t end
+  local p = t[code]
+  if not p then p = FOLDER .. "/font/" .. set .. "/" .. string.format("%04x", code) .. ".png"; t[code] = p end
+  return p
+end
+local function glyphWidth(text, size) return #codepointsCached(text) * ADV * size end
 -- The letters sit on a common baseline 1.02 em below the top of their picture, capitals 0.73 em tall (measured on the pictures); to put the TOP of the capitals at `capTop` px the picture goes
 -- up by the 0.29 em above them. The capitals of the title start 10 px under the capsule's top, the subtitle's 33 px (as DirectWrite drew them).
 local ASC, CAP = 1.02, 0.73
@@ -246,7 +263,7 @@ local function drawGlyphText(x, y, text, kind, size, rgba, reveal, clipped)
   local set = pickSet(kind, size)
   local gw, gh = quadSize(set, size)
   local adv = ADV * size
-  for i, cp in ipairs(codepoints(text)) do
+  for i, cp in ipairs(codepointsCached(text)) do
     local gx = x + (i - 1) * adv
     if clipped and gx >= x + reveal or (not clipped) and gx + adv > x + reveal then break end
     local code = glyphCode(cp)
@@ -299,10 +316,15 @@ local function iconPath(img) return FOLDER and (FOLDER .. "/icons/ico-" .. img .
 
 local function fullWidth(l, k) return (PAD * 2 + BADGE + GAP) * k + math.max(textWidth(l.title, TITLE * k), textWidth(l.sub, SUB * k)) + 10 * k + 4 end
 
-local function drawCapsule(e, k)   -- at the cursor; moves the cursor down
+local function capWidth(e, k)   -- the width of a capsule as it is drawn right now (an icon alone is narrow, one with its text out is wide)
+  local c, l = e.cap, e.line
+  local tw = (math.max(textWidth(l.title, TITLE * k), textWidth(l.sub, SUB * k)) + 10 * k) * c.w
+  return ((PAD * 2 + BADGE) * k + (tw > 1 and (GAP * k + tw) or 0)) * c.scale + 4
+end
+
+local function drawCapsule(e, k, x0)   -- at x0, the top-left of its place in the window (its column and row)
   local c, l = e.cap, e.line
   local col = l.c
-  local x0 = ui.getCursor()
   local textW = math.max(textWidth(l.title, TITLE * k), textWidth(l.sub, SUB * k)) + 10 * k
   local tw = textW * c.w
   local sc, fade = c.scale, c.fade
@@ -335,18 +357,30 @@ local function drawCapsule(e, k)   -- at the cursor; moves the cursor down
     end
     if clipped then ui.popClipRect() end
   end
-  ui.setCursor(x0 + vec2(0, (CAPH + 8) * k))
 end
 
 function script.windowBanners(dt)
   drawnAt = clock
   local k = store.scale
   local x0 = ui.getCursor()
-  local width = 330 * k
-  for _, e in ipairs(entries) do width = math.max(width, fullWidth(e.line, k)) end
-  for _, e in ipairs(entries) do drawCapsule(e, k) end
-  ui.setCursor(x0 + vec2(0, math.max(1, #entries) * (CAPH + 8) * k))
-  ui.dummy(vec2(width, 2))   -- (the window fits its content: the room of the banners that are on screen, at least one)
+  local rows = math.max(1, store.rows or 5)
+  local slot = (CAPH + 8) * k
+  local colX, width = 0, 0
+  for first = 1, math.max(1, #entries), rows do   -- a column at a time, top to bottom; the next one starts to its right (the banners that do not fit under the others)
+    local colW = 0
+    for i = first, math.min(first + rows - 1, #entries) do colW = math.max(colW, capWidth(entries[i], k)) end
+    for i = first, math.min(first + rows - 1, #entries) do drawCapsule(entries[i], k, x0 + vec2(colX, (i - first) * slot)) end
+    colX = colX + colW + (colW > 0 and 10 * k or 0)
+    width = colX
+  end
+  width = math.max(width, 330 * k * (#entries == 0 and 1 or 0), 60 * k)
+  local needH = math.min(math.max(1, #entries), rows) * slot
+  ui.setCursor(x0 + vec2(0, needH))
+  ui.dummy(vec2(width, 2))
+  seenWin.need, seenWin.drawn = { width, needH }, #entries   -- (and what the game really gave the window: it can be less than it asked for)
+  seenWin.maxDrawn = math.max(seenWin.maxDrawn, #entries)
+  local ws = safe(ui.windowSize)
+  if ws then seenWin.got = { ws.x, ws.y } end   -- (the window fits its content: the room of the columns of banners that are on screen)
 end
 
 -- ---- the settings window ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -372,6 +406,8 @@ function script.windowSettings(dt)
   ui.sameLine()
   if ui.button("Probar audio") then playRadio() end
   if ui.button("Texto: " .. (store.glyph == 1 and "imagenes de letras" or "DirectWrite")) then store.glyph = 1 - store.glyph end
+  ui.sameLine()
+  if ui.button("Por columna: " .. store.rows) then store.rows = cycle(ROWS, store.rows) end
   if store.demo > 0 and incoming then   -- a script that sends lines (the real hub, or the probe) has priority over the demo: say so, it looks like the demo is broken
     ui.textColored("AVISO: el demo esta tapado: un script (la sonda?) esta mandando lineas. Cierra la sonda para ver el demo.", rgbm(1, 0.78, 0.2, 1))
   end
@@ -379,6 +415,8 @@ function script.windowSettings(dt)
   ui.text("Diagnostico (que ofrece el juego):")
   for _, name in ipairs(WANT) do ui.text("  " .. name .. ": " .. (has(name) and "si" or "NO")) end
   ui.text("carpeta de la app: " .. tostring(FOLDER))
+  ui.text("banderas en pantalla: " .. #entries .. " (maximo visto " .. seenWin.maxDrawn .. ") en " .. math.ceil(#entries / math.max(1, store.rows)) .. " columna(s) de " .. store.rows .. " filas como maximo")
+  ui.text("la ventana de banderas pide " .. (seenWin.need and string.format("%d x %d", seenWin.need[1], seenWin.need[2]) or "-") .. " px y el juego le da " .. (seenWin.got and string.format("%d x %d", seenWin.got[1], seenWin.got[2]) or "?") .. " px")
   ui.text("audio: " .. audio.status)
   ui.text("letras cargadas: " .. preload.ready .. " / " .. #allGlyphs .. " (preguntadas " .. preload.i .. ")")
   ui.text("fps: " .. tostring(safe(function() return math.floor(ac.getSim().fps + 0.5) end)))

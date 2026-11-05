@@ -132,6 +132,30 @@ assert(maxIcons >= 8, "eight banners on screen at once: " .. maxIcons)
 assert(folded, "a moment with the information banners as icons only while the instruction and the winner still show their text")
 H.store.demo = 1
 
+-- columns: with a few rows the banners that do not fit start a new column to the right; with many rows they are one column
+H.store.scale = 1
+local function layout(rows)
+  H.store.rows, H.store.demo = rows, 2
+  local maxH, maxW, maxX, maxN = 0, 0, 0, 0
+  for _ = 1, 100 do frame(0.05) end
+  for _ = 1, 800 do
+    frame(0.05)
+    maxH, maxW = math.max(maxH, cur.y), math.max(maxW, dummies[1].x)
+    for _, r in ipairs(rec.rects) do maxX = math.max(maxX, r[1].x) end
+    local n = 0
+    for _, src in ipairs(rec.images) do if src:find("/icons/", 1, true) then n = n + 1 end end
+    maxN = math.max(maxN, n)
+  end
+  return maxH, maxW, maxX, maxN
+end
+local h3, w3, x3, n3 = layout(3)
+assert(h3 <= 3 * 64 + 3, "three rows at most: " .. h3)
+assert(x3 > 100 and n3 >= 8, "the rest start a new column to the right, and all eight are drawn: x=" .. x3 .. " n=" .. n3)
+local h12, w12, x12, n12 = layout(12)
+assert(x12 < 30 and n12 >= 8 and h12 >= 7 * 64, "twelve rows: a single column of eight: x=" .. x12 .. " h=" .. h12)
+assert(w3 > w12, "two or three columns are wider than one")
+H.store.scale, H.store.rows, H.store.demo = 1.25, 5, 1
+
 -- the language of the settings reaches the demo; sound off = no new calls
 H.store.lang = "en"
 local n0 = plays
