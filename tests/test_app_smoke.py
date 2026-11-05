@@ -68,6 +68,8 @@ def test_the_app_end_to_end_against_a_stand_in():
         seen.update(e["cap"].s for e in app.stack.caps.values())
     assert {"open", "text", "fold", "icon", "shut", "close"} <= seen, "the demo shows every phase: " + str(sorted(seen))
     assert fake_ac.glBegin.called and fake_ac.glQuadTextured.called, "capsules and icons are drawn"
+    letters = [c.args[0] for c in fake_ac.newTexture.call_args_list if os.sep + "font" + os.sep in c.args[0]]
+    assert any(p.endswith("0041.png") for p in letters) and len(set(letters)) > 10, "the text is drawn as glyph quads: " + str(len(set(letters)))
     import socket, threading
     slow = socket.create_connection(("127.0.0.1", 28761), timeout=5)
     slow.sendall(b"POST /tick HTTP/1.1\r\nHost: 127.0.0.1:28761\r\n")   # a client that never finishes its request

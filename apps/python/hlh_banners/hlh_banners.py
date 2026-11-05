@@ -3,7 +3,8 @@
 #   - which stdlib modules the game's Python has (socket, http.server, hashlib, json, winsound...)
 #   - does the local server run, and does the CSP script reach it (POST /tick)
 #   - GL: the rounded capsule, an alpha PNG icon (glQuadTextured)
-#   - TEXT: AC apps have no clip rectangle and no text measure; "Mascara" tells if a quad drawn in the render callback hides a label (look at the screen)
+#   - TEXT: the first session showed that a label (ac.addLabel) is not seen over our own drawing and cannot be clipped, so the text is drawn as textured glyph quads (glyphs.py, font/):
+#     the order of drawing, the exact width and the reveal letter by letter are ours. "Etiqueta" keeps one label on screen, only to learn how the layers are ordered.
 #   - AUDIO: "Audio" tries winsound with a generated wav (the radio beep)
 # The pure parts (capsule.py, ipc.py, guard.py) are tested on a desktop: tests/. Python 3.3 compatible (no f-strings).
 import os
@@ -27,11 +28,13 @@ LOCK = threading.Lock()
 app = None
 server = None
 notes = []
-state = {"lines": [], "lines_at": 0.0, "last_render": 0.0, "lang": "auto", "demo": False, "demo_t": 0.0, "mask": False, "test_window": True}
+state = {"lines": [], "lines_at": 0.0, "last_render": 0.0, "lang": "auto", "demo": False, "demo_t": 0.0, "label": False}
 stack = None
-labels, textures = [], {}
+glyphs = None
+labels, textures, glyph_tex = [], {}, {}
 buttons = {}
-POOL = 4   # capsules drawn at once (labels are widgets: a fixed set of them is made once)
+POOL = 4   # capsules drawn at once
+TITLE, SUB = 20, 12   # the sizes the text is drawn at (px)
 STEP = 64  # px between capsules
 
 
@@ -214,15 +217,33 @@ def icon(img):
     return textures[img]
 
 
-def text_width(s, size):   # AC apps cannot measure text: an estimate (the real width is found in the first session)
-    return len(s) * size * 0.62
+def glyph(set_name, code):
+    key = (set_name, code)
+    if key not in glyph_tex:
+        path = os.path.join(HERE, "font", set_name, "%04x.png" % code)   # code comes from glyphs.code_of: a number in the known set
+        try:
+            glyph_tex[key] = ac.newTexture(path) if os.path.isfile(path) else None
+        except Exception as e:
+            glyph_tex[key] = None
+            note("glyph %04x" % code, "FAIL " + repr(e))
+    return glyph_tex[key]
+
+
+def draw_text(x, y, text, set_name, size, rgba, reveal):
+    """The text as quads, only the letters that fit completely inside `reveal` px (so the panel opens letter by letter and nothing is ever outside it)."""
+    gw, gh = glyphs.quad_size(set_name, size)
+    ac.glColor4f(*rgba)
+    for dx, code in glyphs.layout(text, size, reveal):
+        tex = glyph(set_name, code)
+        if tex:
+            ac.glQuadTextured(x + dx, y, gw, gh, tex)
 
 
 def draw_capsule(wx, wy, slot, e):
     c, l = e["cap"], e["line"]
     col = l["c"]
     title, sub = l["title"], l["sub"]
-    max_w = max(text_width(title, 18), text_width(sub, 11)) + 10
+    max_w = max(glyphs.width(title, TITLE), glyphs.width(sub, SUB)) + 10   # exact: the face is monospace
     tw = max_w * c.w
     sc, fade = c.scale, c.fade
     W = 12 + 44 + (10 + tw if tw > 1 else 0)
@@ -237,19 +258,10 @@ def draw_capsule(wx, wy, slot, e):
     if tex:
         ac.glColor4f(1, 1, 1, fade)
         ac.glQuadTextured(bx + bs * 0.14, by + bs * 0.14, bs * 0.72, bs * 0.72, tex)
-    # the text: labels are widgets, drawn by the game, not clipped by us. alpha follows the unfolding; a mask experiment is below.
-    t_lab, s_lab = labels[slot]
-    a = c.w ** 3
-    tx = x + 6 + 44 + 10
-    ac.setPosition(t_lab, tx - wx, y + 8 - wy)
-    ac.setPosition(s_lab, tx - wx, y + 31 - wy)
-    ac.setText(t_lab, title if tw > 1 else "")
-    ac.setText(s_lab, sub if tw > 1 else "")
-    ac.setFontColor(t_lab, 1, 1, 1, a)
-    ac.setFontColor(s_lab, 0.68, 0.71, 0.76, a)
-    if state["mask"] and tw > 1:   # does a quad drawn here hide the label's right part? (then the text can be clipped to the panel)
-        ac.glColor4f(0.047, 0.047, 0.055, 1)
-        quad(x + 6 + 44 + 10 + tw, y, max_w - tw + 40, h)
+    if tw > 1 and sc == 1.0:   # the text is drawn last, over the capsule, and only while the capsule is not shrinking (the text is gone before that: w == 0)
+        tx = x + 6 + 44 + 10
+        draw_text(tx, y + 4, title, "t", TITLE, (1, 1, 1, fade), tw - 4)
+        draw_text(tx, y + 33, sub, "s", SUB, (0.68, 0.71, 0.76, fade), tw - 4)
 
 
 def on_render(delta):
@@ -257,16 +269,18 @@ def on_render(delta):
     now = time.time()
     state["last_render"] = now
     wx, wy = ac.getPosition(app)
+    if state["label"]:   # the layer experiment: a label right where the first capsule's title goes
+        ac.setPosition(labels[0], 8 + 6 + 44 + 10, 8 + 4)
+        ac.setText(labels[0], "ETIQUETA")
+        ac.setFontColor(labels[0], 1, 1, 1, 1)
+    else:
+        ac.setText(labels[0], "")
     if state["demo"]:
         state["demo_t"] = (state["demo_t"] + delta) % 26.0
     with LOCK:
         live = state["lines"] if now - state["lines_at"] < 1.0 else None
     lines = live if live is not None else (demo_lines(state["demo_t"]) if state["demo"] else [])
     drawn = stack.update(lines, max(0.0, min(delta, 0.1)))
-    for slot in range(POOL):
-        if slot >= len(drawn):
-            ac.setText(labels[slot][0], "")
-            ac.setText(labels[slot][1], "")
     for slot, e in enumerate(drawn[:POOL]):
         draw_capsule(wx, wy, slot, e)
 
@@ -321,10 +335,10 @@ def on_demo(*args):
     ac.setText(buttons["demo"], "Demo: " + ("on" if state["demo"] else "off"))
 
 
-def on_mask(*args):
-    state["mask"] = not state["mask"]
-    ac.setText(buttons["mask"], "Mascara: " + ("on" if state["mask"] else "off"))
-    note("mask", "now %s: with it on, is the text cut at the panel's edge? (look at the screen)" % state["mask"])
+def on_label(*args):
+    state["label"] = not state["label"]
+    ac.setText(buttons["mask"], "Etiqueta: " + ("on" if state["label"] else "off"))
+    note("label", "now %s: with the demo on, is the word ETIQUETA seen over the capsule (on top of its dark background) or hidden under it?" % state["label"])
 
 
 def on_lang(*args):
@@ -336,6 +350,8 @@ def on_lang(*args):
 def acMain(ac_version):
     global app, stack
     import capsule
+    global glyphs
+    import glyphs
     note("python", sys.version.replace("\n", " "))
     for m in ("socket", "ssl", "http.server", "hashlib", "binascii", "base64", "json", "threading", "configparser", "winsound", "wave"):
         try_import(m)
@@ -344,13 +360,10 @@ def acMain(ac_version):
     app = ac.newApp("HLH Banners probe")
     ac.setSize(app, 520, 330)
     ac.setBackgroundOpacity(app, 0.35)
-    for i in range(POOL):
-        t = ac.addLabel(app, "")
-        s = ac.addLabel(app, "")
-        ac.setFontSize(t, 18)
-        ac.setFontSize(s, 11)
-        labels.append((t, s))
-    for n, (key, text, fn, x) in enumerate((("demo", "Demo: off", on_demo, 8), ("audio", "Audio", on_audio, 138), ("mask", "Mascara: off", on_mask, 238), ("lang", "Idioma: " + state["lang"], on_lang, 378))):
+    lab = ac.addLabel(app, "")   # one label, only for the layer experiment
+    ac.setFontSize(lab, 18)
+    labels.append(lab)
+    for n, (key, text, fn, x) in enumerate((("demo", "Demo: off", on_demo, 8), ("audio", "Audio", on_audio, 138), ("mask", "Etiqueta: off", on_label, 238), ("lang", "Idioma: " + state["lang"], on_lang, 378))):
         b = ac.addButton(app, text)
         ac.setPosition(b, x, 290)
         ac.setSize(b, 120 if key != "audio" else 90, 28)
