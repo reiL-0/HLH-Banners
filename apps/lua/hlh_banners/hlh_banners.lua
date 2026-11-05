@@ -372,6 +372,9 @@ function script.windowSettings(dt)
   ui.sameLine()
   if ui.button("Probar audio") then playRadio() end
   if ui.button("Texto: " .. (store.glyph == 1 and "imagenes de letras" or "DirectWrite")) then store.glyph = 1 - store.glyph end
+  if store.demo > 0 and incoming then   -- a script that sends lines (the real hub, or the probe) has priority over the demo: say so, it looks like the demo is broken
+    ui.textColored("AVISO: el demo esta tapado: un script (la sonda?) esta mandando lineas. Cierra la sonda para ver el demo.", rgbm(1, 0.78, 0.2, 1))
+  end
   ui.separator()
   ui.text("Diagnostico (que ofrece el juego):")
   for _, name in ipairs(WANT) do ui.text("  " .. name .. ": " .. (has(name) and "si" or "NO")) end

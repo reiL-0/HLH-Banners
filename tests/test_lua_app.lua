@@ -208,8 +208,18 @@ assert(codes[0x3F] and codes[0xD1], "an unknown letter becomes '?', an accented 
 -- the settings window runs and lists what is missing
 local listed = {}
 ui.text = function(t) listed[#listed + 1] = t end
+ui.textColored = function(t) listed[#listed + 1] = t end
 ui.MediaPlayer = nil
+H.store.demo = 1
+handlers["HLH.Banners.lines"]("id=live;img=flag-black;kind=action;c=0.6,0.6,0.6;title=NEGRA;sub=A BOXES;ev=1")
+script.update(0.05)
 script.windowSettings(0.05)
+local blob = table.concat(listed, "\n")
+assert(blob:find("AVISO: el demo esta tapado", 1, true), "it says when a script covers the demo")
+listed = {}
+for _ = 1, 40 do script.update(0.05) end   -- the script goes quiet (more than a second without lines)
+script.windowSettings(0.05)
+assert(not table.concat(listed, "\n"):find("AVISO", 1, true), "and the warning goes when the script stops")
 local blob = table.concat(listed, "\n")
 assert(blob:find("ui.MediaPlayer: NO", 1, true) and blob:find("ui.drawRect: si", 1, true) and blob:find("carpeta de la app: /app", 1, true), "the diagnostics say what the game offers")
 print("lua app ok")
