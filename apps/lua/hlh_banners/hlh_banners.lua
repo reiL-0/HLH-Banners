@@ -1,7 +1,6 @@
 -- HLH Banners: a Custom Shaders Patch Lua app. Draws the race-control banners as capsules (an icon badge + a text panel) in a window the driver moves. Its window has none of the game's frame (the
 -- manifest uses the official NO_BACKGROUND / NO_TITLE_BAR / AUTO_RESIZE flags). The app knows no server: it draws the lines a game script sends it (HLH.Banners.lines, see CONTRACT.md) and answers with its
--- language and a heartbeat. Without lines it can run a demo of every kind of banner. DRAFT: written from the CSP Lua documentation; none of it has run in the game yet, and the settings window
--- lists which game functions exist so the first session tells what works.
+-- language and a heartbeat. Without lines it can run a demo of every kind of banner. Version 1.0.
 --   banner kinds: "info" folds its text to the icon after 5 s, "action" keeps it while it applies, "sticky" stays until the script stops sending it.
 -- The text is drawn as pictures of letters (font/, a monospace face rendered by tools/make_glyphs.py), not with DirectWrite: the game builds a DirectWrite text the first time it sees it, which made
 -- the text arrive late and apart from the animation (measured in the game); a picture that is already loaded is drawn at once, and its width is exact, so the text unfolds with the panel.
