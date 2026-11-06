@@ -84,6 +84,16 @@ advance(k, 1.5, false, "action", function(x) assert(not (x.scale < 1 and x.w > 0
 assert(k.s == "dead")
 local b = H.newCap(); advance(b, 3, true, "action"); advance(b, 0.2, false, "action"); assert(b.s == "shut"); advance(b, 0.02, true, "action"); assert(b.s == "open", "comes back")
 
+-- custom hold duration (setting): 3 s folds earlier, 10 s keeps text longer
+H.store.hold = 3
+local c3 = H.newCap(); advance(c3, 0.6, true, "info"); advance(c3, 2.2, true, "info"); assert(c3.s == "text")
+advance(c3, 1.5, true, "info"); assert(c3.s == "icon" and c3.w == 0, "folds after 3 s when hold=3")
+H.store.hold = 10
+local c10 = H.newCap(); advance(c10, 0.6, true, "info"); advance(c10, 6.0, true, "info"); assert(c10.s == "text", "stays open past 5 s when hold=10")
+advance(c10, 4.5, true, "info"); assert(c10.s == "icon" and c10.w == 0, "folds after 10 s when hold=10")
+assert(H.cycle(H.HOLDS, 3) == 5 and H.cycle(H.HOLDS, 10) == 3, "hold duration cycles through HOLDS")
+H.store.hold = 5
+
 -- ---- the stack ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 local function ln(id, img, ev, kind) return { id = id, img = img, ev = ev, kind = kind or "info" } end
 local st = H.newStack()
@@ -204,8 +214,12 @@ local nFit = sizes(0)
 assert(nFit > 3, "fitted: the size follows the banners: " .. nFit)
 H.store.reserve, H.store.rows, H.store.demo = 1, 5, 1
 
--- the next column does not move while a capsule of the first one unfolds or folds: four fixed banners in two columns of two; the widest (the first) folds its text at ~5.5 s
+-- the next column glides to close the gap when a capsule of the first one folds to icon: four fixed banners in two columns of two; the widest (the first) folds its text at ~5.5 s
 do
+  local capIcon = { cap = { s = "icon", w = 0, scale = 1 }, line = { title = "TEST", sub = "SUB" } }
+  local capText = { cap = { s = "text", w = 1, scale = 1 }, line = { title = "TEST", sub = "SUB" } }
+  assert(H.capWidth(capIcon, 1) < 70 and H.capWidth(capText, 1) > 100, "capWidth reflects icon vs text")
+
   H.store.rows, H.store.demo, H.store.scale, H.store.reserve = 2, 0, 1, 1
   local function send(payload) handlers["HLH.Banners.lines"](payload) end
   local EMPTY = ""
@@ -223,7 +237,7 @@ do
       if i * 0.05 > 6.5 then folded = true end
     end
   end
-  assert(folded and hi - lo < 2, "the last column stays where it is while the first one's text folds: it moved " .. (hi - lo) .. " px")
+  assert(folded and hi - lo > 100, "the last column glides to close the gap when the first one's text folds: it moved " .. (hi - lo) .. " px")
   H.store.rows, H.store.demo, H.store.scale = 5, 1, 1.25
   for i = 1, 100 do if i % 3 == 1 then send(EMPTY) end; frame(0.05) end
 end

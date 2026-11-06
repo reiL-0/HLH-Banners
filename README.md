@@ -10,6 +10,7 @@ Custom Shaders Patch (CSP) Lua app for Assetto Corsa that renders animated race-
 - **Crisp typography:** Pre-rendered letter atlas for immediate, tear-free text animations.
 - **Audio alerts:** Radio chime notification on new banners with configurable volume.
 - **Delta window:** F1-style VSC delta telemetry bar with sector strikes, timing delta, and live status hints.
+- **Configurable duration:** Adjustable banner text unfold duration (3s, 5s, 8s, 10s) via in-game settings.
 - **Multilingual:** Supports Spanish and English, selectable via in-game settings.
 
 ## Installation (Content Manager)

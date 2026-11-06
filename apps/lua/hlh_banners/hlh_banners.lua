@@ -18,6 +18,7 @@ local function clamp(x, lo, hi) if x < lo then return lo elseif x > hi then retu
 -- open (the icon pops 0.4 -> 1.05 -> 1 while the text unfolds to the right) -> text -> [fold: an "info" banner's text folds after 5 s] -> icon -> close (the badge shrinks to 0.2 and fades).
 -- A banner removed while its text is out folds the text FIRST (shut), so no text is ever left on its own and the icon only shrinks when the text is gone.
 local CAP_T, TEXT_SEC = { open = 0.55, shut = 0.4, close = 0.32 }, 5
+local store
 local function easeOut(t) t = clamp(t, 0, 1) return 1 - (1 - t) ^ 3 end
 local function easeIn(t) t = clamp(t, 0, 1) return t * t end
 local function popScale(t) if t < 0.6 then return 0.4 + 0.65 * easeOut(t / 0.6) end return 1.05 - 0.05 * easeOut((t - 0.6) / 0.4) end
@@ -32,7 +33,8 @@ local function capStep(c, dt, want, kind)   -- false once the capsule is gone
     if p >= 1 then c.s, c.t, c.age, c.w, c.pop = "text", 0, 0, 1, 1 end
   elseif s == "text" then
     c.w, c.pop, c.age = 1, 1, c.age + dt
-    if not want then c.s, c.t = "shut", 0 elseif kind == "info" and c.age >= TEXT_SEC then c.s, c.t = "fold", 0 end
+    local limit = (store and store.hold) or TEXT_SEC
+    if not want then c.s, c.t = "shut", 0 elseif kind == "info" and c.age >= limit then c.s, c.t = "fold", 0 end
   elseif s == "fold" then
     c.w = 1 - easeIn(c.t / CAP_T.shut)
     if c.t >= CAP_T.shut then c.s, c.t, c.w = "icon", 0, 0 end
@@ -118,11 +120,11 @@ local function parseDelta(payload)
 end
 
 -- ---- settings (kept by the game between sessions) ----------------------------------------------------------------------------------------------------------------------------------------
-local SCALES, VOLUMES, LANGS, ROWS = { 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0 }, { 100, 70, 40, 0 }, { "auto", "es", "en" }, { 3, 4, 5, 6, 8, 12 }
-local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 2, rows = 5, reserve = 1, info = 0 }
+local SCALES, VOLUMES, LANGS, ROWS, HOLDS = { 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0 }, { 100, 70, 40, 0 }, { "auto", "es", "en" }, { 3, 4, 5, 6, 8, 12 }, { 3, 5, 8, 10 }
+local DEFAULTS = { lang = "auto", scale = 1.25, sound = 100, demo = 1, glyph = 2, rows = 5, reserve = 1, info = 0, hold = 5 }
 -- glyph: 2 = the text from one atlas picture of letters, 1 = one picture per letter, 0 = DirectWrite (to compare); info: 1 = a line of numbers under the banners (what the app and the game do);
--- rows: banners per column before a new column starts; reserve: 1 = the window always has the room of the whole grid (it never has to grow), 0 = it fits what is on screen
-local store = safe(ac.storage, DEFAULTS) or DEFAULTS
+-- rows: banners per column before a new column starts; reserve: 1 = the window always has the room of the whole grid (it never has to grow), 0 = it fits what is on screen; hold: seconds info cards keep their text before folding
+store = safe(ac.storage, DEFAULTS) or DEFAULTS
 local function cycle(list, cur) for i, v in ipairs(list) do if v == cur then return list[i % #list + 1] end end return list[1] end
 
 local FOLDER = safe(function() return ac.getFolder(ac.FolderID.ScriptOrigin) end)   -- the app's own folder (icons, typeface, radio sound)
@@ -155,7 +157,7 @@ local MANY = {   -- id, icon, kind, colour, text key, from s, until s
   { "track-limits", "track-limits", "info", { 0.361, 0.42, 0.753 }, "limits", 1.5, 33 },
   { "pits", "pits-closed", "info", { 0.937, 0.325, 0.314 }, "pits", 3, 34 },
   { "white", "flag-white", "info", { 0.96, 0.96, 0.96 }, "white", 4.5, 35 },
-  { "bw", "flag-bw", "info", { 0.741, 0.741, 0.741 }, "bw", 6, 36 },
+  { "bw", "flag-bw", "action", { 0.741, 0.741, 0.741 }, "bw", 6, 36 },
   { "n-blue", "flag-blue", "action", { 0.161, 0.475, 1 }, "blue", 8, 31 },
   { "owed", "give-back", "action", { 1, 0.439, 0.263 }, "owed", 10, 29 },   -- (a give-back has its countdown: it ends before the flag)
   { "winner", "winner", "sticky", { 1, 0.835, 0.31 }, "winner", 12, 37 },
@@ -420,6 +422,12 @@ local function iconPath(img) return FOLDER and (FOLDER .. "/icons/ico-" .. img .
 
 local function fullWidth(l, k) return (PAD * 2 + BADGE + GAP) * k + math.max(textWidth(l.title, TITLE * k), textWidth(l.sub, SUB * k)) + 10 * k + 4 end
 
+local function capWidth(e, k)   -- the width of a capsule as it is drawn right now (an icon alone is narrow, one with its text out is wide)
+  local c, l = e.cap, e.line
+  local tw = (math.max(textWidth(l.title, TITLE * k), textWidth(l.sub, SUB * k)) + 10 * k) * c.w
+  return ((PAD * 2 + BADGE) * k + (tw > 1 and (GAP * k + tw) or 0)) * c.scale + 4
+end
+
 -- One line of text. Letters from the pictures (instant, also for a counter that changes every second) when every character has one; DirectWrite, which handles any alphabet but is built by the game the
 -- first time it sees a text, only for the lines that need it (a name in Cyrillic) or when asked ("Texto: DirectWrite").
 local function drawLine(x, yGlyph, yDw, text, kind, size, rgba, reveal, clipped, wholePanel)
@@ -476,19 +484,19 @@ local function drawGroup(name, dt)
   local x0 = ui.getCursor()
   local rows = math.max(1, store.rows or 5)
   local slot = (CAPH + 8) * k
-  -- A column is as wide as its widest capsule WITH ITS TEXT OUT (not as it is drawn this frame): the next column does not move while a capsule of the first one unfolds or folds. When the banners of a
-  -- column really change, the next column glides to its new place.
+  -- A column is as wide as its widest capsule as drawn this frame; when all capsules fold to icons it occupies only an icon's width (~56-70 px)
+  -- and the next column glides smoothly to sit right beside it, leaving no awkward empty void.
   local ci, acc = 0, 0
   for first = 1, math.max(1, #entries), rows do
     ci = ci + 1
     local last = math.min(first + rows - 1, #entries)
-    local fullW = 0
-    for i = first, last do fullW = math.max(fullW, fullWidth(entries[i].line, k)) end
+    local colW = 0
+    for i = first, last do colW = math.max(colW, capWidth(entries[i], k)) end
     local p = colPos[ci] or acc
     p = p + (acc - p) * math.min(1, (dt or 0.016) * 12)
     colPos[ci] = p
     for i = first, last do drawCapsule(entries[i], k, x0 + vec2(p, (i - first) * slot)) end
-    acc = acc + fullW + (fullW > 0 and 10 * k or 0)
+    acc = acc + colW + (colW > 0 and 10 * k or 0)
   end
   for j = ci + 1, #colPos do colPos[j] = nil end
   local width = math.max(acc, 60 * k, 330 * k * (#entries == 0 and 1 or 0))
@@ -596,8 +604,9 @@ function script.windowSettings(dt)
   if ui.button("Probar audio") then playRadio() end
   if ui.button("Texto: " .. ({ [0] = "DirectWrite", "letras sueltas", "atlas de letras" })[store.glyph]) then store.glyph = (store.glyph + 2) % 3 end
   ui.sameLine()
-  if ui.button("Por columna: " .. store.rows) then store.rows = cycle(ROWS, store.rows) end
+  if ui.button("Duracion: " .. (store.hold or 5) .. " s") then store.hold = cycle(HOLDS, store.hold or 5) end
   ui.sameLine()
+  if ui.button("Por columna: " .. store.rows) then store.rows = cycle(ROWS, store.rows) end
   if ui.button("Ventana: " .. (store.reserve == 1 and "reservada" or "ajustada")) then store.reserve = 1 - store.reserve end
   ui.sameLine()
   if ui.button("Info en pantalla: " .. (store.info == 1 and "on" or "off")) then store.info = 1 - store.info end
@@ -617,4 +626,4 @@ function script.windowSettings(dt)
 end
 
 if _G.__HLH_TEST then _G.__hlh = { parseDelta = parseDelta, groups = groups, groupOf = groupOf, atlasCodeAt = atlasCodeAt, glyphUV = glyphUV, stat = stat, glyphY = glyphY, codepoints = codepoints, pickSet = pickSet, quadSize = quadSize, glyphWidth = glyphWidth, capStep = capStep, newCap = newCap, newStack = newStack, stackUpdate = stackUpdate, parseLines = parseLines, store = store, calls = calls, audio = audio,
-                                    KEYS = { KEY_LINES, KEY_LANG, KEY_ALIVE }, cycle = cycle, fullWidth = fullWidth, demoLines = demoLines } end
+                                    KEYS = { KEY_LINES, KEY_LANG, KEY_ALIVE }, cycle = cycle, fullWidth = fullWidth, capWidth = capWidth, demoLines = demoLines, HOLDS = HOLDS } end
